@@ -128,20 +128,24 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _list(self, query):
-    """``GET /nodes``: top-level processes, newest first, ``limit``/``before``/``q``."""
+    """``GET /nodes``: top-level processes, newest first, ``limit``/``cursor``/``q``."""
     rows = [n for n in NODES.values() if n["kind"] == "process"]
-    rows.sort(key=lambda n: n["ctime"], reverse=True)
-    if "before" in query:
-        rows = [n for n in rows if n["ctime"] < query["before"][0]]
+    rows.sort(key=lambda n: (n["ctime"], n["pk"]), reverse=True)
+    if "cursor" in query:     # opaque to the client; here the index of the next row
+        rows = rows[int(query["cursor"][0]):]
+        start = int(query["cursor"][0])
+    else:
+        start = 0
     if "q" in query:
         q = query["q"][0].lower()
-        rows = [n for n in rows if q in " ".join(str(n.get(k) or "") for k in ("label", "template", "formula")).lower()]
+        fields = ("label", "description", "template", "formula", "process_label")
+        rows = [n for n in rows if q in " ".join(str(n.get(k) or "") for k in fields).lower()]
     limit = int(query.get("limit", ["50"])[0])
     page = rows[:limit]
-    keys = ("pk", "uuid", "process_label", "template", "label", "description", "process_state", "exit_status",
-            "ctime", "formula")
+    keys = ("pk", "uuid", "label", "description", "ctime", "template", "formula", "process_label",
+            "process_state", "exit_status", "exit_message")
     self._send(200, json.dumps({"schema": "sim-agent.node/1", "nodes": [{k: n.get(k) for k in keys} for n in page],
-                                "next": page[-1]["ctime"] if len(rows) > limit else None}).encode())
+                                "next_cursor": str(start + limit) if len(rows) > limit else None}).encode())
 
 
 Handler._list = _list

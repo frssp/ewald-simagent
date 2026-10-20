@@ -236,3 +236,18 @@ def test_login_warns_about_plain_http(monkeypatch):
     with pytest.raises(SystemExit, match="Not saved"):
         __main__.main(["login", "http://10.0.0.5/alice/", "--user", "alice"])
     assert client.connections() == {}
+
+
+def test_listing_follows_the_cursor(connected):
+    from ewald_simagent import client
+
+    api = client.Client(client.get_connection())
+    seen, cursor = [], None
+    while True:
+        page = api.nodes(limit=1, cursor=cursor)
+        seen += [n["pk"] for n in page["nodes"]]
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert seen == [400, 300, 100]
+    assert [n["pk"] for n in api.nodes(q="mlff")["nodes"]] == [400]

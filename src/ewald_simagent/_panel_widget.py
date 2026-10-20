@@ -151,11 +151,20 @@ class SimAgentPanel(QtWidgets.QWidget):
             self._say("Looking up…")
             self._run(lambda: api.node(text), lambda node, err: self._show_nodes([node] if node else [], err, None))
         else:
-            before = self.next_page if more else None
+            cursor = self.next_page if more else None
             self._say("Loading your calculations…")
-            self._run(lambda: api.nodes(limit=50, before=before, q=text or None),
+            self._run(lambda: self._page(api, cursor, text or None),
                       lambda page, err: self._show_nodes((page or {}).get("nodes", []), err,
-                                                         (page or {}).get("next")))
+                                                         (page or {}).get("next_cursor")))
+
+    @staticmethod
+    def _page(api, cursor, q, pages: int = 10):
+        """One page with rows: a search page can come back empty with a next one (sim-agent reads
+        a bounded number of calculations per page), so follow the cursor a few times."""
+        page = api.nodes(limit=50, cursor=cursor, q=q)
+        while not page.get("nodes") and page.get("next_cursor") and pages > 1:
+            page, pages = api.nodes(limit=50, cursor=page["next_cursor"], q=q), pages - 1
+        return page
 
     def _show_nodes(self, nodes, error, next_page):
         if error:

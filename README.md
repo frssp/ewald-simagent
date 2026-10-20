@@ -32,7 +32,7 @@ The **sim-agent** button on the activity bar (the icon column at the left) opens
 with your recent calculations, newest first. Type a PK or UUID to jump to one, or words to
 search. Expanding a calculation lists its steps (restarts together), their files (CHGCAR and
 LOCPOT read from the cluster) and output structures; a double click opens one, and the buttons
-insert a `load(...)` cell or copy the path. The list needs sim-agent's `GET /api/v1/nodes`.
+insert a `load(...)` cell or copy the path. The list is sim-agent's `GET /api/v1/nodes` (newest first, paged with a cursor).
 
 1. Plugins side bar › sim-agent results › **Settings** (or Edit › Plugin settings › sim-agent):
    the server address, your login, and either an access key from the web UI (user menu › API
