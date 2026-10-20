@@ -5,7 +5,8 @@ analysis. The plugin only reads: submitting, killing and resubmitting stay in si
 
 ```bash
 pip install "ewald-simagent @ git+https://github.com/frssp/ewald-simagent"
-python -m ewald_simagent login http://SERVER/alice/ --user alice     # asks your web password once, keeps a token
+python -m ewald_simagent login http://SERVER/alice/ --user alice     # asks your web password once, keeps a key
+python -m ewald_simagent login http://SERVER/alice/ --user alice --key   # or paste a key from the web UI (API keys)
 python -m ewald_simagent login http://SERVER/alice/ --user alice --host supercom=hpc   # SSH alias for a Computer
 python -m ewald_simagent show 1234                                   # steps, files, and the path that opens each
 ```
@@ -29,9 +30,10 @@ in saved notebooks, which store only the string.
 
 Your sim-agent backend (the address you open in the browser) serves a read-only results API
 under `/api/v1`, and only for your own calculations: another user's PK answers like a PK that
-does not exist. `login` asks your web password once, trades it for an API token
-(`POST /api/v1/tokens`, 180 days) and keeps only the token. Revoke it in sim-agent when a
-machine should lose access.
+does not exist. Data requests take an access key only. `login` either asks your web
+password once and makes a key with it (`POST /api/v1/tokens`, 180 days), or with `--key`
+takes a key you made in the web UI (user menu > API keys); either way only the key is kept.
+Revoke it under API keys when a machine should lose access.
 
 For a node it lists the calculations under it in call order, with their retrieved files and
 work directories on the cluster. Files
@@ -43,7 +45,7 @@ reads all of them with its own readers.
 
 Files of a finished calculation are cached under `<ewald config>/cache/simagent/<uuid>/`; a
 calculation still running is downloaded again on every load and marked incomplete. The address
-and login name are in `<ewald config>/simagent.json`; the token is in the OS keychain
+and login name are in `<ewald config>/simagent.json`; the access key is in the OS keychain
 (`ewald.keychain`), never in that file, settings.json or the environment.
 
 Every frame carries `attributes["sim-agent"]` (`pk`, `uuid`, `template`, `calc_pk`, `step`,

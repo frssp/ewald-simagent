@@ -13,8 +13,10 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     login = sub.add_parser("login", help="save a connection to your sim-agent backend")
     login.add_argument("url", help="your sim-agent address, e.g. http://server/alice/")
-    login.add_argument("--user", required=True, help="your sim-agent login (the password is asked once, "
-                       "to get an API token)")
+    login.add_argument("--user", required=True, help="your sim-agent login")
+    login.add_argument("--key", action="store_true",
+                       help="paste an access key made in the web UI (user menu > API keys) instead of "
+                            "typing the web password once to make one")
     login.add_argument("--name", default="default", help="connection name (default: default)")
     login.add_argument("--host", action="append", default=[], metavar="COMPUTER=HOST",
                        help="SSH host for a sim-agent Computer's work directories, e.g. supercom=hpc")
@@ -32,12 +34,17 @@ def main(argv=None):
         if args.command == "login":
             hosts = dict(h.split("=", 1) for h in args.host)
             conn = client.Connection(args.name, args.url, args.user, hosts)
-            password = getpass.getpass(f"sim-agent web password for {args.user}: ")
-            token = client.Client(conn, password=password).mint_token(f"ewald on {socket.gethostname()}")
+            if args.key:
+                token = getpass.getpass("sim-agent access key (sa_pat_...): ").strip()
+            else:
+                password = getpass.getpass(f"sim-agent web password for {args.user}: ")
+                token = client.Client(conn, password=password).mint_token(f"ewald on {socket.gethostname()}")
             who = client.Client(conn, token=token).whoami()
+            if who.get("user") != args.user:
+                raise client.SimAgentError(f"That key belongs to {who.get('user')!r}, not {args.user!r}")
             client.save_connection(conn, token)
-            print(f"Saved {args.name!r}: {args.url} as {who['user']}; the token is in the keychain, "
-                  "the password is not kept")
+            print(f"Saved {args.name!r}: {args.url} as {who['user']}; the access key is in the keychain, "
+                  "no password is kept")
         elif args.command == "show":
             from . import describe
 

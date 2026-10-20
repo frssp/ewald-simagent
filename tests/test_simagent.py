@@ -136,3 +136,17 @@ def test_login_trades_the_password_for_a_token(server, monkeypatch):
     with pytest.raises(SystemExit):
         __main__.main(["login", server, "--user", "alice", "--name", "other"])
     assert "other" not in client.connections()
+
+
+def test_login_with_a_key_from_the_web_ui(server, monkeypatch):
+    from ewald_simagent import __main__, client
+
+    from .conftest import TOKEN
+
+    monkeypatch.setattr("getpass.getpass", lambda prompt: TOKEN + "\n")
+    __main__.main(["login", server, "--user", "alice", "--key"])
+    assert client.get_connection().token() == TOKEN
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "sa_pat_bogus")
+    with pytest.raises(SystemExit):
+        __main__.main(["login", server, "--user", "alice", "--key", "--name", "other"])
+    assert "other" not in client.connections()
