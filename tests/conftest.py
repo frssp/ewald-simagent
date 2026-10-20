@@ -25,7 +25,7 @@ def _calc(pk, path, files, state="finished", remote=True):
 
 NODES = {
     100: {"kind": "process", "process_label": "WorkGraph<vasp_bands>", "template": "vasp_bands",
-          "process_state": "finished", "exit_status": 0, "scalars": {"band_gap": 0.61},
+          "process_state": "finished", "exit_status": 0, "scalars": {"misc": {"band_gap": 0.61, "total_energy": -10.8}},
           "structures": [{"link": "relaxed_structure", "pk": 200, "uuid": "c8" * 16, "formula": "Si2"}],
           "calculations": [
               _calc(101, ["relax", "iteration_01"], ["OUTCAR", "vasprun.xml"]),
@@ -37,6 +37,14 @@ NODES = {
           "exit_status": None, "scalars": {}, "structures": [],
           "calculations": [_calc(300, [], ["vasprun.xml"], state="running")]},
     200: {"kind": "structure", "formula": "Si2", "natoms": 2},
+    400: {"kind": "process", "process_label": "WorkGraph<vasp_mlff_training>", "template": "vasp_mlff_training",
+          "process_state": "finished", "exit_status": 0, "scalars": {}, "structures": [],
+          "calculations": [
+              _calc(401, ["dft", "SiO2_000"], ["vasprun.xml"]),
+              _calc(402, ["dft", "SiO2_001", "iteration_01"], ["vasprun.xml"]),
+              _calc(403, ["dft", "SiO2_001", "iteration_02"], ["vasprun.xml"]),
+              _calc(404, ["dft", "Si_000"], ["vasprun.xml"]),
+          ]},
 }
 for pk, node in NODES.items():
     node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
@@ -64,8 +72,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _odd(self) -> bool:
+        """``/moved/...`` redirects to another host; ``/portal/...`` answers a login page."""
+        if self.path.startswith("/moved/"):
+            self.send_response(302)
+            self.send_header("Location", "http://sso.example.org/login")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        if self.path.startswith("/portal/"):
+            self._send(200, b"<html>Sign in</html>", "text/html")
+            return True
+        return False
+
     def do_POST(self):
         Handler.requests.append(self.path)
+        if self._odd():
+            return
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         if not self.path.endswith("/api/v1/tokens"):
             return self._send(404, b'{"status": "error", "message": "no such route"}')
@@ -76,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Handler.requests.append(self.path)
+        if self._odd():
+            return
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":  # Basic only mints tokens
             return self._send(401, b'{"status": "error", "message": "sim-agent login required"}')
         parts = self.path.split("/api/v1/", 1)[1].split("/")
@@ -83,6 +108,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"user": USER, "schema": "sim-agent.node/1",
                                                "version": "test"}).encode())
         node = NODES.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
+        if node is None and len(parts) > 1:      # a UUID prefix (8 characters at least)
+            found = [n for n in NODES.values() if n["uuid"].startswith(parts[1])]
+            node = found[0] if len(found) == 1 and len(parts[1]) >= 8 else None
         calcs = {c["pk"]: c for n in NODES.values() for c in n.get("calculations", [])}
         if len(parts) == 2 and node is not None:
             return self._send(200, json.dumps(node).encode())

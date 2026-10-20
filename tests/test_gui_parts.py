@@ -61,8 +61,8 @@ def test_ai_tool_lists_paths_to_open(connected):
     from ewald_simagent.tools import simagent_node
 
     out = simagent_node(None, "100")
-    assert out["open"] == "simagent:100" and out["scalars"] == {"band_gap": 0.61}
-    assert [s["path"] for s in out["steps"]][:3] == ["simagent:100/relax/iteration_01",
-                                                     "simagent:100/relax/iteration_02", "simagent:100/scf"]
-    assert out["structures"] == [{"path": "simagent:100/relaxed_structure", "formula": "Si2"}]
+    assert out["open"] == "simagent:default/00000064-" and out["scalars"]["misc"]["band_gap"] == 0.61
+    assert [s["path"] for s in out["steps"]][:3] == ["simagent:default/00000064-/relax/iteration_01",
+                                                     "simagent:default/00000064-/relax/iteration_02", "simagent:default/00000064-/scf"]
+    assert out["structures"] == [{"path": "simagent:default/00000064-/relaxed_structure", "formula": "Si2"}]
     assert out["steps"][2]["work_dir"] == "/scratch/alice/103" and "relaxed_structure" in out["listing"]

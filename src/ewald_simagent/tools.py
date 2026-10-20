@@ -12,13 +12,13 @@ def simagent_node(toolset, node: str, connection: str | None = None) -> dict:
     ``pipe = load("simagent:1234/bands")``); files that were not retrieved, like CHGCAR, open over SSH."""
     from . import describe
     from .client import Client, get_connection
-    from .uri import parse
+    from .uri import parse, stable
 
     uri = parse(node if str(node).startswith("simagent:") else f"simagent:{node}")
     conn = get_connection(connection or uri.connection)
     desc = Client(conn).node(uri.node)
-    head = f"simagent:{conn.name}/{desc['pk']}" if connection or uri.connection else f"simagent:{desc['pk']}"
-    out = {"listing": describe(node, connection), "open": head, "kind": desc.get("kind"),
+    head = stable(conn.name, desc["uuid"])   # the same calculation on any machine, unlike a PK
+    out = {"listing": describe(node, connection), "open": head, "pk": desc["pk"], "kind": desc.get("kind"),
            "process_label": desc.get("process_label"), "process_state": desc.get("process_state"),
            "exit_status": desc.get("exit_status"), "template": desc.get("template"),
            "scalars": desc.get("scalars", {})}

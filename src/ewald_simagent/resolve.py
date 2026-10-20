@@ -9,17 +9,34 @@ directory left on the cluster. A path picks from that description in this order:
 3. one file of the chosen step (``simagent:1234/scf/CHGCAR``). A retrieved file comes from
    sim-agent; any other file is read from the work directory over SSH.
 
-Without a file, the trajectory of the step is meant: every calculation of that step with a
-vasprun.xml, joined in call order (a relaxation restarted twice gives one trajectory). With
-no step either, that is the first step that has a vasprun.xml (a workflow's relaxation).
+Without a file, the trajectory of the step is meant: the restarts of one calculation joined in
+call order, that is the calculations whose call paths differ only in a last ``iteration_NN``
+(a relaxation restarted twice gives one trajectory). With no step either, that is the first
+calculation with a vasprun.xml (a workflow's relaxation). When the step holds other, separate
+calculations (an MLFF set of structures, a composite graph), only the first is opened and
+:func:`resolve` warns with the paths that open the others: their structures differ, so joining
+them into one trajectory would be wrong.
 """
 from __future__ import annotations
 
+import re
+import warnings
 from dataclasses import dataclass
 
 from .client import Connection, SimAgentError
 
 TRAJECTORY_FILE = "vasprun.xml"
+_RESTART = re.compile(r"^iteration_\d+$")
+
+
+class SimAgentWarning(UserWarning):
+    """A path opened less than the whole step (one of several separate calculations)."""
+
+
+def run_key(calc: dict) -> tuple:
+    """The call path without a last ``iteration_NN``: restarts of one calculation share it."""
+    path = tuple(calc.get("path", ()))
+    return path[:-1] if path and _RESTART.match(path[-1]) else path
 
 
 @dataclass(frozen=True)
@@ -97,10 +114,19 @@ def resolve(desc: dict, parts: tuple = ()) -> list[Target]:
         return [Target("file", with_remote[-1], name, "remote")]
 
     with_traj = [c for c in chosen if TRAJECTORY_FILE in c.get("files", [])]
-    if with_traj and not stepped:
-        first = with_traj[0]["path"][:1]
-        with_traj = [c for c in with_traj if c["path"][:1] == first]
     if with_traj:
+        first = run_key(with_traj[0])
+        others = list(dict.fromkeys(run_key(c) for c in with_traj if run_key(c) != first))
+        with_traj = [c for c in with_traj if run_key(c) == first]
+        if not stepped:   # a workflow's other steps (scf, bands) are no surprise; its own parts are
+            others = [k for k in others if k[:1] == first[:1]]
+        if others:
+            head = "/".join([str(desc["pk"]), *parts])
+            shown = ", ".join("simagent:" + "/".join([str(desc["pk"]), *k]) for k in others[:5])
+            warnings.warn(f"simagent:{head} holds {len(others) + 1} separate calculations; opened the first "
+                          f"({'/'.join(first) or desc['pk']}). Others: {shown}"
+                          + (f" and {len(others) - 5} more" if len(others) > 5 else ""), SimAgentWarning,
+                          stacklevel=2)
         return [Target("file", c, TRAJECTORY_FILE, "retrieved") for c in with_traj]
     if structures and not stepped:
         return [Target("structure", list(structures.values())[-1])]

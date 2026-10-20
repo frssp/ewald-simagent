@@ -56,13 +56,30 @@ EWALD's SSH remote files, so they need the same SSH access to the cluster that
 `load("hpc:/path")` does; once scratch is cleaned only the retrieved files are left. EWALD
 reads all of them with its own readers.
 
-Files of a finished calculation are cached under `<ewald config>/cache/simagent/<uuid>/`; a
-calculation still running is downloaded again on every load and marked incomplete. The address
+Files of a finished calculation are cached under `<ewald config>/cache/simagent/<uuid>/`, up to
+`cache_limit_gb` in `simagent.json` (10 GB by default; the least recently opened go first); a
+calculation still running is downloaded again on every load and marked incomplete.
+
+Use the server's `https://` address when it has one. A plain `http://` address to another
+machine sends the key unencrypted, so `login` asks before saving it (`--allow-http` skips the
+question; the settings page has Allow plain http). For a self-signed certificate give its CA
+bundle (`--ca-file`, or CA file in the settings). The plugin does not follow redirects, so a key
+never goes to another host; it tells you the address to use instead. On a PC with `HTTP_PROXY`
+set, add the server to `NO_PROXY`, or requests (and the key) go through the proxy. The address
 and login name are in `<ewald config>/simagent.json`; the access key is in the OS keychain
 (`ewald.keychain`), never in that file, settings.json or the environment.
 
 Every frame carries `attributes["sim-agent"]` (`pk`, `uuid`, `template`, `calc_pk`, `step`,
-`file`, ...) and the numbers of the process's `Dict` outputs (`band_gap`, `total_energy`, ...).
+`file`, ...) and, under `scalars`, the numbers of the process's `Dict` outputs by output name
+(`{"misc": {"band_gap": ..., "total_energy": ...}}`, VASP units). They describe the whole
+process, so they are not frame attributes of their own.
+
+A step's trajectory joins only the restarts of one calculation (call paths that differ in a
+last `iteration_NN`). A step that holds separate calculations, such as one DFT run per
+structure in an MLFF workflow, opens its first one and warns with the paths of the others.
+
+`show` and the AI tool give paths as `simagent:CONNECTION/UUID-PREFIX`: a PK is unique only in
+one server's database, so that is the form to keep in a notebook.
 
 ## The contract with sim-agent
 

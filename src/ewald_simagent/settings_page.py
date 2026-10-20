@@ -43,6 +43,11 @@ class SimAgentSettings:
         SettingsField("hosts", "SSH hosts", kind="multiline", placeholder="supercom=hpc",
                       help="One COMPUTER=HOST per line when a cluster's own hostname does not work "
                            "here (an ~/.ssh/config alias or an EWALD remote computer)"),
+        SettingsField("allow_http", "Allow plain http", kind="bool",
+                      help="An http:// address to another machine sends the key unencrypted; tick this "
+                           "only when the server has no https"),
+        SettingsField("ca_file", "CA file", placeholder="optional",
+                      help="CA bundle to trust when the server's https certificate is self-signed"),
         SettingsField("name", "Connection name", default="default",
                       help="Keep several servers under different names; simagent:NAME/1234 picks one"),
     )
@@ -59,7 +64,8 @@ class SimAgentSettings:
         if conn is None:
             return {}
         return {"url": conn.url, "user": conn.user, "key": conn.token() is not None, "password": False,
-                "hosts": "\n".join(f"{c}={h}" for c, h in conn.hosts.items()), "name": conn.name}
+                "hosts": "\n".join(f"{c}={h}" for c, h in conn.hosts.items()), "name": conn.name,
+                "allow_http": client.plain_http(conn.url), "ca_file": conn.ca_file}
 
     def save(self, values: dict) -> str:
         url, user = values["url"].strip(), values["user"].strip()
@@ -68,12 +74,19 @@ class SimAgentSettings:
             raise ValueError("The server address starts with http:// or https:// (the address of sim-agent's web UI)")
         if not user:
             raise ValueError("Enter your sim-agent login")
-        conn = client.Connection(name, url, user, _hosts(values.get("hosts", "")))
+        if client.plain_http(url) and not values.get("allow_http"):
+            raise ValueError(f"{url} is plain http: the access key would cross the network unencrypted. Use "
+                             "https://, or tick Allow plain http if the server has no https")
+        ca_file = values.get("ca_file", "").strip()
+        try:
+            conn = client.Connection(client.check_name(name), url, user, _hosts(values.get("hosts", "")), ca_file)
+        except client.SimAgentError as exc:
+            raise ValueError(str(exc)) from None
         old = self._current(name)
         try:
             if values.get("key") or values.get("password"):
                 who = client.login(conn, key=values.get("key") or None, password=values.get("password") or None)
-            elif old is not None and old.token() and (old.url, old.user) == (conn.url, conn.user):
+            elif old is not None and old.name == name and old.token() and (old.url, old.user) == (conn.url, conn.user):
                 client.save_connection(conn)            # only the hosts or nothing changed: keep the key
                 who = client.Client(conn).whoami()
             else:

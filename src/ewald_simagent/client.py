@@ -12,7 +12,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
+import ssl
 import tempfile
 import urllib.error
 import urllib.parse
@@ -36,6 +38,8 @@ class Connection:
     #: sim-agent Computer label -> host to use for its work directories (an ``~/.ssh/config``
     #: alias or an EWALD remote profile), when the cluster's own hostname does not work here
     hosts: dict = field(default_factory=dict)
+    #: a CA bundle to trust for this server (a self-signed certificate), "" for the system's
+    ca_file: str = ""
 
     @property
     def secret_name(self) -> str:
@@ -85,7 +89,25 @@ def get_connection(name: str | None = None) -> Connection:
     return conns[name]
 
 
+#: a connection name must not read as a node, or ``simagent:NAME/...`` would mean the node NAME
+_NODE_LIKE = re.compile(r"^(\d+|[0-9a-fA-F-]{4,36})$")
+
+
+def check_name(name: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name or "") or _NODE_LIKE.match(name):
+        raise SimAgentError(f"Connection name {name!r}: use letters, digits, '-', '_' or '.', and not "
+                            "something that reads as a PK or UUID (e.g. 'default', 'lab')")
+    return name
+
+
+def plain_http(url: str) -> bool:
+    """True for ``http://`` to anything but this machine: the key would cross the network unencrypted."""
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme == "http" and parts.hostname not in ("localhost", "127.0.0.1", "::1")
+
+
 def save_connection(conn: Connection, token: str | None = None, default: bool = True) -> None:
+    check_name(conn.name)
     cfg = _read_config()
     entry = asdict(conn)
     entry.pop("name")
@@ -128,6 +150,15 @@ def remove_connection(name: str) -> None:
     delete_secret(f"simagent:{name}")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib would carry the Authorization header to the new host and turn
+    ``POST /tokens`` into a GET. The user fixes the address instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SimAgentError(f"sim-agent at {req.full_url} redirects ({code}) to {newurl}; use that "
+                            "address for the connection (Plugin settings › sim-agent, or login again)")
+
+
 class Client:
     """Requests to one sim-agent backend: ``Bearer`` with the saved token, or ``Basic`` with
     ``password`` (only to mint a token)."""
@@ -138,6 +169,8 @@ class Client:
         self.base = conn.url.rstrip("/") + "/api/v1/"
         self.timeout = timeout
         self._password, self._token = password, token
+        context = ssl.create_default_context(cafile=conn.ca_file or None)
+        self._opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context))
 
     def _login_hint(self) -> str:
         return f"Run: python -m ewald_simagent login {self.conn.url} --user {self.conn.user}"
@@ -149,14 +182,14 @@ class Client:
             req.add_header("Content-Type", "application/json")
         if self._password is not None:
             basic = base64.b64encode(f"{self.conn.user}:{self._password}".encode()).decode()
-            req.add_header("Authorization", f"Basic {basic}")
+            req.add_unredirected_header("Authorization", f"Basic {basic}")
         else:
             token = self._token or self.conn.token()
             if token is None:
                 raise SimAgentError(f"No sim-agent token saved for {self.conn.name!r}. {self._login_hint()}")
-            req.add_header("Authorization", f"Bearer {token}")
+            req.add_unredirected_header("Authorization", f"Bearer {token}")
         try:
-            return urllib.request.urlopen(req, timeout=self.timeout)
+            return self._opener.open(req, timeout=self.timeout)
         except urllib.error.HTTPError as exc:
             try:
                 message = json.loads(exc.read().decode()).get("message", "")
@@ -172,15 +205,30 @@ class Client:
             if exc.code == 403:
                 raise SimAgentError(f"sim-agent at {self.conn.url} runs without a login, so it serves "
                                     f"no API: {message}") from None
+            if exc.code == 400:
+                raise SimAgentError(message or f"sim-agent refused the request {path}") from None
+            if exc.code == 503:
+                raise SimAgentError(f"sim-agent at {self.conn.url} cannot answer now: {message}") from None
             if exc.code == 404:
                 raise SimAgentError(message or f"Not found on sim-agent: {path}") from None
             raise SimAgentError(f"sim-agent answered {exc.code} for {path}: {message}") from None
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, ssl.SSLCertVerificationError):
+                raise SimAgentError(f"sim-agent at {self.conn.url}: the certificate is not trusted "
+                                    f"({exc.reason.verify_message}); give its CA file in the connection") from None
             raise SimAgentError(f"Cannot reach sim-agent at {self.conn.url}: {exc.reason}") from None
 
     def get_json(self, path: str, body: dict | None = None) -> dict:
         with self._request(path, body) as resp:
-            return json.loads(resp.read().decode())
+            ctype = resp.headers.get("Content-Type", "")
+            raw = resp.read()
+        try:
+            if "json" not in ctype:
+                raise ValueError(ctype)
+            return json.loads(raw.decode())
+        except ValueError:
+            raise SimAgentError(f"{self.conn.url} answered {path} with {ctype or 'something'} instead of "
+                                "sim-agent's API (a login page or another site?); check the address") from None
 
     def mint_token(self, name: str, ttl_days: int = 180) -> str:
         """A new API token (needs the client made with ``password``)."""
