@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import socket
 import sys
 
 
@@ -35,14 +34,9 @@ def main(argv=None):
             hosts = dict(h.split("=", 1) for h in args.host)
             conn = client.Connection(args.name, args.url, args.user, hosts)
             if args.key:
-                token = getpass.getpass("sim-agent access key (sa_pat_...): ").strip()
+                who = client.login(conn, key=getpass.getpass("sim-agent access key (sa_pat_...): "))
             else:
-                password = getpass.getpass(f"sim-agent web password for {args.user}: ")
-                token = client.Client(conn, password=password).mint_token(f"ewald on {socket.gethostname()}")
-            who = client.Client(conn, token=token).whoami()
-            if who.get("user") != args.user:
-                raise client.SimAgentError(f"That key belongs to {who.get('user')!r}, not {args.user!r}")
-            client.save_connection(conn, token)
+                who = client.login(conn, password=getpass.getpass(f"sim-agent web password for {args.user}: "))
             print(f"Saved {args.name!r}: {args.url} as {who['user']}; the access key is in the keychain, "
                   "no password is kept")
         elif args.command == "show":

@@ -19,6 +19,12 @@ simagent = "ewald_simagent"
 [project.entry-points."ewald.readers"]
 simagent = "ewald_simagent.reader:SimAgentReader"
 
+[project.entry-points."ewald.settings_pages"]
+simagent = "ewald_simagent.settings_page:SimAgentSettings"
+
+[project.entry-points."ewald.tools"]
+simagent_node = "ewald_simagent.tools:simagent_node"
+
 [project.scripts]
 ewald-simagent = "ewald_simagent.__main__:main"
 

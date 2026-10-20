@@ -26,6 +26,19 @@ pipe = load("simagent:lab/3f9c2e1a")            # another saved connection; a UU
 The same strings work in notebook cells, on the command line (`ewald gui simagent:1234`) and
 in saved notebooks, which store only the string.
 
+## In the GUI, without Python
+
+1. Plugins side bar › sim-agent results › **Settings** (or Edit › Plugin settings › sim-agent):
+   the server address, your login, and either an access key from the web UI (user menu › API
+   keys) or your web password, which is used once to make a key and not kept. **Test** checks
+   the login, **Log out** forgets it.
+2. File › **Open location…** (Ctrl+L) and type `simagent:1234`, or any path above.
+3. Or ask in Ask AI ("open the bands of 1234"): the `simagent_node` tool lists a node's steps,
+   files and structures with the path for each, and the AI loads the one you want.
+
+The settings page and Open location need an EWALD with plugin settings pages; with an older one
+use `python -m ewald_simagent login` and `load()` in a cell.
+
 ## How it works
 
 Your sim-agent backend (the address you open in the browser) serves a read-only results API

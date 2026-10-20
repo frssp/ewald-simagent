@@ -99,6 +99,24 @@ def save_connection(conn: Connection, token: str | None = None, default: bool = 
         set_secret(conn.secret_name, token)
 
 
+def login(conn: Connection, key: str | None = None, password: str | None = None) -> dict:
+    """Check ``conn`` with an access key (``key``) or by trading the web ``password`` once for a
+    new key, then save it; returns ``whoami``. Only the key is kept, in the keychain."""
+    if key:
+        token = key.strip()
+    elif password:
+        import socket
+
+        token = Client(conn, password=password).mint_token(f"ewald on {socket.gethostname()}")
+    else:
+        raise SimAgentError("Give an access key (sim-agent web UI: user menu > API keys) or the web password")
+    who = Client(conn, token=token).whoami()
+    if who.get("user") != conn.user:
+        raise SimAgentError(f"That key belongs to {who.get('user')!r}, not {conn.user!r}")
+    save_connection(conn, token)
+    return who
+
+
 def remove_connection(name: str) -> None:
     cfg = _read_config()
     cfg.get("connections", {}).pop(name, None)
