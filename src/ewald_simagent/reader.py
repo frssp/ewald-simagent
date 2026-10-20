@@ -6,6 +6,7 @@ from pathlib import Path
 from ewald.io.base import FrameReader
 
 from .client import Client, SimAgentError, get_connection
+from .collect import collect
 from .resolve import Target, remote_path, resolve
 from .uri import parse
 
@@ -30,7 +31,7 @@ def fetch(client: Client, target: Target, conn) -> str:
     if target.kind == "structure":
         dest = cache_dir() / node["uuid"] / "structure.extxyz"
         if not dest.exists():
-            client.download(f"nodes/{node['pk']}/structure.extxyz", dest)
+            client.download(f"nodes/{node['pk']}/structure?format=extxyz", dest)
         return str(dest)
     if target.where == "remote":
         return remote_path(node, target.name, conn)
@@ -40,7 +41,7 @@ def fetch(client: Client, target: Target, conn) -> str:
             return str(dest)
     else:
         dest = cache_dir() / node["uuid"] / ".live" / target.name
-    client.download(f"nodes/{node['pk']}/files/{target.name}", dest)
+    client.download(f"nodes/{node['retrieved_pk']}/files/{target.name}", dest)
     return str(dest)
 
 
@@ -65,7 +66,7 @@ class SimAgentReader(FrameReader):
         self.uri = parse(self.path)
         self.connection = get_connection(connection or self.uri.connection)
         client = Client(self.connection)
-        self.node = client.node(self.uri.node)
+        self.node = collect(client, self.uri.node)
         self.targets = resolve(self.node, self.uri.parts)
         self._readers, self._index = [], []
         for target in self.targets:

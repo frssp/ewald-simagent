@@ -4,14 +4,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_NODE = re.compile(r"^(\d+|[0-9a-fA-F-]{4,36})$")
+_NODE = re.compile(r"^(\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$")
 
 
 @dataclass(frozen=True)
 class SimAgentURI:
-    """``node`` is a PK (int) or a UUID / UUID prefix (str). ``parts`` narrow it down, in order:
-    an output structure's link label (``relaxed_structure``), a step of the workflow (a call
-    label such as ``relax`` or ``bands``) or a file of that step (``OUTCAR``, ``CHGCAR``).
+    """``node`` is a PK (int) or a full UUID (str; sim-agent takes no prefixes). ``parts``
+    narrow it down, in order: an output structure's link label (``relaxed_structure``), a step
+    of the workflow (a call label such as ``relax`` or ``bands``) or a file of that step
+    (``OUTCAR``, ``CHGCAR``).
     ``connection`` None is the default saved connection."""
 
     node: int | str
@@ -24,9 +25,9 @@ class SimAgentURI:
 
 
 def parse(text: str) -> SimAgentURI:
-    """Parse ``simagent:1234``, ``simagent:lab/1234``, ``simagent:3f9c2e1a/relax/CHGCAR``.
+    """Parse ``simagent:1234``, ``simagent:lab/1234``, ``simagent:1234/relax/CHGCAR``.
 
-    The first part is the node when it is a number or looks like a UUID; otherwise it names
+    The first part is the node when it is a number or a full UUID; otherwise it names
     the connection and the node follows.
     """
     if not text.lower().startswith("simagent:"):

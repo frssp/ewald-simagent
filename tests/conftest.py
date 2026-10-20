@@ -1,6 +1,6 @@
-"""A fake sim-agent backend on localhost: the ``/api/v1`` routes of sim-agent's
-``web/results_api.py``, answering from :data:`NODES` and serving ``tests/data/vasprun.xml``.
-Payloads follow the ``sim-agent.node/1`` shape that module documents."""
+"""A fake sim-agent backend on localhost: the node API of sim-agent's
+``docs/api/node-api-v1.md`` (``sim-agent.nodes/1``), answering from :data:`NODES` and serving
+``tests/data/vasprun.xml``. Keep it matching that document."""
 import base64
 import json
 import threading
@@ -11,35 +11,62 @@ from typing import ClassVar
 import pytest
 
 DATA = Path(__file__).parent / "data"
-USER, PASSWORD = "alice", "s3cret"
+USER, PASSWORD, TOKEN = "alice", "s3cret", "sa_pat_test"
+API = "sim-agent.nodes/1"
 
 
-def _calc(pk, path, files, state="finished", remote=True):
-    return {"pk": pk, "uuid": f"{pk:08x}-0000-4000-8000-000000000000", "path": path,
-            "process_label": "VaspCalculation", "process_state": state, "exit_status": 0,
-            "exit_message": None, "files": files, "structures": [],
-            "remote": {"computer": "supercom", "hostname": "hpc.example.org", "username": "alice",
-                       "path": f"/scratch/alice/{pk}"} if remote else None}
+def _uuid(pk):
+    return f"{pk:08x}-1111-4000-8000-000000000000"
+
+
+def _summary(pk, cls, kind, **extra):
+    return {"api": API, "pk": pk, "uuid": _uuid(pk), "class": cls, "node_type": f"{kind}.{cls}.",
+            "kind": kind, "label": "", "description": "", "ctime": "2026-10-20T00:00:00+00:00",
+            "inputs": [], "outputs": [], "links_truncated": False, "files": [], **extra}
+
+
+def _proc(label, state="finished", **extra):
+    return {"process_label": label, "process_state": state, "exit_status": 0 if state == "finished" else None,
+            "exit_message": None, "sealed": state == "finished", "caller_pk": None, "template": None, **extra}
+
+
+def _called(pk, link, cls="CalcJobNode", label="VaspCalculation"):
+    return {"pk": pk, "uuid": _uuid(pk), "link_label": link, "label": "", "class": cls,
+            "process_label": label, "process_state": "finished", "exit_status": 0}
+
+
+def _calc(pk, state="finished"):
+    remote = {"computer": "supercom", "hostname": "hpc.example.org", "username": "alice",
+              "path": f"/scratch/alice/{pk}"}
+    return _summary(pk, "CalcJobNode", "process",
+                    process=_proc("VaspCalculation", state, retrieved_pk=pk + 1000, remote=remote))
+
+
+def _folder(pk, names):
+    return _summary(pk, "FolderData", "data", files=[{"path": n, "size": 10} for n in names], data={})
 
 
 NODES = {
-    100: {"kind": "process", "process_label": "WorkGraph<vasp_bands>", "template": "vasp_bands",
-          "process_state": "finished", "exit_status": 0, "scalars": {"band_gap": 0.61},
-          "structures": [{"link": "relaxed_structure", "pk": 200, "uuid": "c8" * 16, "formula": "Si2"}],
-          "calculations": [
-              _calc(101, ["relax", "iteration_01"], ["OUTCAR", "vasprun.xml"]),
-              _calc(102, ["relax", "iteration_02"], ["OUTCAR", "vasprun.xml"]),
-              _calc(103, ["scf"], ["OUTCAR", "vasprun.xml"]),
-              _calc(104, ["bands"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
-          ]},
-    300: {"kind": "process", "process_label": "VaspCalculation", "process_state": "running",
-          "exit_status": None, "scalars": {}, "structures": [],
-          "calculations": [_calc(300, [], ["vasprun.xml"], state="running")]},
-    200: {"kind": "structure", "formula": "Si2", "natoms": 2},
+    100: _summary(100, "WorkGraphNode", "process",
+                  outputs=[{"link_label": "relaxed_structure", "link_type": "return", "pk": 200,
+                            "uuid": _uuid(200), "class": "StructureData", "node_type": ""},
+                           {"link_label": "misc", "link_type": "return", "pk": 150, "uuid": _uuid(150),
+                            "class": "Dict", "node_type": ""}],
+                  process=_proc("WorkGraph<vasp_bands>", template="vasp_bands",
+                                called=[_called(110, "relax", "WorkChainNode", "VaspWorkChain"),
+                                        _called(103, "scf"), _called(104, "bands")])),
+    110: _summary(110, "WorkChainNode", "process",
+                  process=_proc("VaspWorkChain", called=[_called(101, "iteration_01"),
+                                                         _called(102, "iteration_02")])),
+    150: _summary(150, "Dict", "data", data={"dict": {"band_gap": 0.61, "note": "x", "ok": True}}),
+    200: _summary(200, "StructureData", "data",
+                  data={"structure": {"formula": "Si2", "num_sites": 2, "cell": [], "pbc": [True] * 3}}),
+    **{pk: _calc(pk) for pk in (101, 102, 103, 104)},
+    **{pk + 1000: _folder(pk + 1000, ["OUTCAR", "vasprun.xml"]) for pk in (101, 102, 103)},
+    1104: _folder(1104, ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
+    300: _calc(300, state="running"),
+    1300: _folder(1300, ["vasprun.xml"]),
 }
-for pk, node in NODES.items():
-    node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
-                 "node_type": "", "label": "", "ctime": "2026-10-20T00:00:00+00:00"})
 
 EXTXYZ = ('2\nLattice="5.43 0 0 0 5.43 0 0 0 5.43" Properties=species:S:1:pos:R:3 pbc="T T T"\n'
           "Si 0 0 0\nSi 1.3575 1.3575 1.3575\n")
@@ -51,34 +78,45 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, code, body: bytes, ctype="application/json"):
+    def _send(self, code, body, ctype="application/json"):
+        body = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        if code == 401:
-            self.send_header("WWW-Authenticate", 'Basic realm="sim-agent"')
         self.end_headers()
         self.wfile.write(body)
 
+    def _error(self, code, message):
+        self._send(code, {"status": "error", "message": message})
+
+    def do_POST(self):
+        Handler.requests.append(("POST", self.path))
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        basic = "Basic " + base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
+        if not self.path.endswith("/api/v1/tokens"):
+            return self._error(404, "no such route")
+        if self.headers.get("Authorization") != basic:
+            return self._error(401, "wrong password")
+        self._send(201, {"status": "success", "token": TOKEN, "id": "1a2b3c4d", "name": body.get("name")})
+
     def do_GET(self):
-        Handler.requests.append(self.path)
-        good = "Basic " + base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
-        if self.headers.get("Authorization") != good:
-            return self._send(401, b'{"status": "error", "message": "sim-agent login required"}')
-        parts = self.path.split("/api/v1/", 1)[1].split("/")
+        Handler.requests.append(("GET", self.path))
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            return self._error(401, "missing, unknown, revoked or expired token")
+        route, _, query = self.path.split("/api/v1/", 1)[1].partition("?")
+        parts = route.split("/")
         if parts == ["whoami"]:
-            return self._send(200, json.dumps({"user": USER, "schema": "sim-agent.node/1",
-                                               "version": "test"}).encode())
+            return self._send(200, {"status": "success", "api": API, "user": USER})
         node = NODES.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
-        calcs = {c["pk"]: c for n in NODES.values() for c in n.get("calculations", [])}
-        if len(parts) == 2 and node is not None:
-            return self._send(200, json.dumps(node).encode())
-        if len(parts) == 3 and parts[2] == "structure.extxyz" and node and node["kind"] == "structure":
-            return self._send(200, EXTXYZ.encode(), "text/plain")
-        if (len(parts) >= 4 and parts[2] == "files" and int(parts[1]) in calcs
-                and "/".join(parts[3:]) in calcs[int(parts[1])]["files"]):
+        if node is None:
+            return self._error(404, f"No node {parts[1] if len(parts) > 1 else ''} among your calculations.")
+        if len(parts) == 2:
+            return self._send(200, {"status": "success", "node": node})
+        if parts[2] == "structure" and node["class"] == "StructureData" and query == "format=extxyz":
+            return self._send(200, EXTXYZ.encode(), "chemical/x-extxyz")
+        if parts[2] == "files" and "/".join(parts[3:]) in [f["path"] for f in node["files"]]:
             return self._send(200, (DATA / "vasprun.xml").read_bytes(), "application/octet-stream")
-        self._send(404, json.dumps({"status": "error", "message": "No node among your calculations."}).encode())
+        self._error(404, "No such file.")
 
 
 @pytest.fixture
@@ -101,5 +139,5 @@ def _ewald_config(tmp_path, monkeypatch):
 def connected(server):
     from ewald_simagent import client
 
-    client.save_connection(client.Connection("default", server, USER, {}), PASSWORD)
+    client.save_connection(client.Connection("default", server, USER, {}), TOKEN)
     return server

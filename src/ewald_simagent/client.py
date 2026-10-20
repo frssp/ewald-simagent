@@ -1,9 +1,11 @@
-"""Saved sim-agent connections and the HTTP client for sim-agent's read-only ``/api/v1``.
+"""Saved sim-agent connections and the HTTP client for sim-agent's read-only node API.
 
-A connection is the address of your own sim-agent backend (``http://server/<you>/``) and your
-web login. Addresses live in ``<ewald config dir>/simagent.json``; the password lives in the
-OS keychain through :mod:`ewald.keychain` (never in that file, settings.json or
-``os.environ``). Only the standard library speaks HTTP, so the plugin adds no dependency.
+A connection is the address of your own sim-agent backend (``http://server/<you>/``, the web
+UI's address) and your login name. ``login`` trades the web password once for an API token
+(``POST /api/v1/tokens``); only the token is kept, in the OS keychain through
+:mod:`ewald.keychain` (never in ``<ewald config dir>/simagent.json``, settings.json or
+``os.environ``). The contract is sim-agent's ``docs/api/node-api-v1.md`` (``sim-agent.nodes/1``).
+Only the standard library speaks HTTP, so the plugin adds no dependency.
 """
 from __future__ import annotations
 
@@ -18,8 +20,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-#: The ``schema`` of ``/api/v1/nodes/{node}`` this plugin reads.
-SCHEMA = "sim-agent.node/1"
+#: The ``api`` version of sim-agent's node API this plugin reads.
+API = "sim-agent.nodes/1"
 
 
 class SimAgentError(RuntimeError):
@@ -39,7 +41,7 @@ class Connection:
     def secret_name(self) -> str:
         return f"simagent:{self.name}"
 
-    def password(self) -> str | None:
+    def token(self) -> str | None:
         from ewald.keychain import get_secret
 
         return get_secret(self.secret_name)[0]
@@ -83,7 +85,7 @@ def get_connection(name: str | None = None) -> Connection:
     return conns[name]
 
 
-def save_connection(conn: Connection, password: str | None = None, default: bool = True) -> None:
+def save_connection(conn: Connection, token: str | None = None, default: bool = True) -> None:
     cfg = _read_config()
     entry = asdict(conn)
     entry.pop("name")
@@ -91,10 +93,10 @@ def save_connection(conn: Connection, password: str | None = None, default: bool
     if default or not cfg.get("default"):
         cfg["default"] = conn.name
     _write_config(cfg)
-    if password:
+    if token:
         from ewald.keychain import set_secret
 
-        set_secret(conn.secret_name, password)
+        set_secret(conn.secret_name, token)
 
 
 def remove_connection(name: str) -> None:
@@ -109,20 +111,32 @@ def remove_connection(name: str) -> None:
 
 
 class Client:
-    """``GET`` requests to one sim-agent backend, with HTTP Basic credentials."""
+    """Requests to one sim-agent backend: ``Bearer`` with the saved token, or ``Basic`` with
+    ``password`` (only to mint a token)."""
 
-    def __init__(self, conn: Connection, password: str | None = None, timeout: float = 60):
+    def __init__(self, conn: Connection, password: str | None = None, token: str | None = None,
+                 timeout: float = 60):
         self.conn = conn
         self.base = conn.url.rstrip("/") + "/api/v1/"
         self.timeout = timeout
-        self._password = password
+        self._password, self._token = password, token
 
-    def _request(self, path: str):
-        req = urllib.request.Request(self.base + path)
-        password = self._password if self._password is not None else self.conn.password()
-        if password is not None:
-            token = base64.b64encode(f"{self.conn.user}:{password}".encode()).decode()
-            req.add_header("Authorization", f"Basic {token}")
+    def _login_hint(self) -> str:
+        return f"Run: python -m ewald_simagent login {self.conn.url} --user {self.conn.user}"
+
+    def _request(self, path: str, body: dict | None = None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method="POST" if data else "GET")
+        if data:
+            req.add_header("Content-Type", "application/json")
+        if self._password is not None:
+            basic = base64.b64encode(f"{self.conn.user}:{self._password}".encode()).decode()
+            req.add_header("Authorization", f"Basic {basic}")
+        else:
+            token = self._token or self.conn.token()
+            if token is None:
+                raise SimAgentError(f"No sim-agent token saved for {self.conn.name!r}. {self._login_hint()}")
+            req.add_header("Authorization", f"Bearer {token}")
         try:
             return urllib.request.urlopen(req, timeout=self.timeout)
         except urllib.error.HTTPError as exc:
@@ -131,27 +145,38 @@ class Client:
             except (OSError, ValueError, AttributeError):
                 message = ""
             if exc.code == 401:
-                raise SimAgentError(
-                    f"sim-agent at {self.conn.url} refused the login of {self.conn.user!r}. "
-                    f"Run: python -m ewald_simagent login {self.conn.url} --user {self.conn.user}"
-                ) from None
+                what = "password" if self._password is not None else "saved token (expired or revoked?)"
+                raise SimAgentError(f"sim-agent at {self.conn.url} refused the {what} of "
+                                    f"{self.conn.user!r}. {self._login_hint()}") from None
+            if exc.code == 403:
+                raise SimAgentError(f"sim-agent at {self.conn.url} runs without a login, so it serves "
+                                    f"no API: {message}") from None
             if exc.code == 404:
                 raise SimAgentError(message or f"Not found on sim-agent: {path}") from None
             raise SimAgentError(f"sim-agent answered {exc.code} for {path}: {message}") from None
         except urllib.error.URLError as exc:
             raise SimAgentError(f"Cannot reach sim-agent at {self.conn.url}: {exc.reason}") from None
 
-    def get_json(self, path: str) -> dict:
-        with self._request(path) as resp:
+    def get_json(self, path: str, body: dict | None = None) -> dict:
+        with self._request(path, body) as resp:
             return json.loads(resp.read().decode())
 
+    def mint_token(self, name: str, ttl_days: int = 180) -> str:
+        """A new API token (needs the client made with ``password``)."""
+        return self.get_json("tokens", {"name": name, "ttl_days": ttl_days})["token"]
+
     def whoami(self) -> dict:
-        return self.get_json("whoami")
+        data = self.get_json("whoami")
+        if data.get("api") != API:
+            raise SimAgentError(f"sim-agent speaks {data.get('api')!r}, this plugin reads {API!r}; "
+                                "update ewald-simagent (or sim-agent)")
+        return data
 
     def node(self, node) -> dict:
-        data = self.get_json(f"nodes/{urllib.parse.quote(str(node))}")
-        if data.get("schema") != SCHEMA:
-            raise SimAgentError(f"sim-agent speaks {data.get('schema')!r}, this plugin reads {SCHEMA!r}; "
+        """sim-agent's summary of one node (PK or full UUID)."""
+        data = self.get_json(f"nodes/{urllib.parse.quote(str(node))}")["node"]
+        if data.get("api") != API:
+            raise SimAgentError(f"sim-agent speaks {data.get('api')!r}, this plugin reads {API!r}; "
                                 "update ewald-simagent (or sim-agent)")
         return data
 

@@ -5,7 +5,7 @@ analysis. The plugin only reads: submitting, killing and resubmitting stay in si
 
 ```bash
 pip install "ewald-simagent @ git+https://github.com/frssp/ewald-simagent"
-python -m ewald_simagent login http://SERVER/alice/ --user alice     # asks for your sim-agent web password
+python -m ewald_simagent login http://SERVER/alice/ --user alice     # asks your web password once, keeps a token
 python -m ewald_simagent login http://SERVER/alice/ --user alice --host supercom=hpc   # SSH alias for a Computer
 python -m ewald_simagent show 1234                                   # steps, files, and the path that opens each
 ```
@@ -19,7 +19,7 @@ pipe = load("simagent:1234/relax/iteration_02") # one run of a step
 pipe = load("simagent:1234/relaxed_structure")  # an output structure
 pipe = load("simagent:1234/scf/OUTCAR")         # a retrieved file
 pipe = load("simagent:1234/scf/CHGCAR")         # a file left on the cluster, read over SSH
-pipe = load("simagent:lab/3f9c2e1a")            # another saved connection; a UUID prefix
+pipe = load("simagent:lab/1234")                # another saved connection (a full UUID works too)
 ```
 
 The same strings work in notebook cells, on the command line (`ewald gui simagent:1234`) and
@@ -27,17 +27,22 @@ in saved notebooks, which store only the string.
 
 ## How it works
 
-Your sim-agent backend (the address you open in the browser) serves `/api/v1` to your own web
-login, and only for your own calculations: another user's PK answers like a PK that does not
-exist. For a node it returns the VASP calculations under it in call order, with the files AiiDA
-retrieved and the work directory on the cluster. EWALD then reads `vasprun.xml`, `OUTCAR`,
-`CONTCAR` and the rest with its own readers. Files that were never retrieved (CHGCAR, LOCPOT)
-are read from the work directory through EWALD's SSH remote files, so they need the same SSH
-access to the cluster that `load("hpc:/path")` does; a cleaned scratch says so.
+Your sim-agent backend (the address you open in the browser) serves a read-only node API
+under `/api/v1`, and only for your own calculations: another user's PK answers like a PK that
+does not exist. `login` asks your web password once, trades it for an API token
+(`POST /api/v1/tokens`, 180 days) and keeps only the token. Revoke it in sim-agent when a
+machine should lose access.
+
+Loading a node walks it from the workflow down to every VASP calculation in call order. Files
+AiiDA retrieved (`vasprun.xml`, `OUTCAR`, `CONTCAR`) are downloaded from sim-agent. Files that
+were never retrieved (CHGCAR, LOCPOT) are read from the calculation's work directory through
+EWALD's SSH remote files, so they need the same SSH access to the cluster that
+`load("hpc:/path")` does; once scratch is cleaned only the retrieved files are left. EWALD
+reads all of them with its own readers.
 
 Files of a finished calculation are cached under `<ewald config>/cache/simagent/<uuid>/`; a
 calculation still running is downloaded again on every load and marked incomplete. The address
-and login name are in `<ewald config>/simagent.json`; the password is in the OS keychain
+and login name are in `<ewald config>/simagent.json`; the token is in the OS keychain
 (`ewald.keychain`), never in that file, settings.json or the environment.
 
 Every frame carries `attributes["sim-agent"]` (`pk`, `uuid`, `template`, `calc_pk`, `step`,
@@ -45,10 +50,10 @@ Every frame carries `attributes["sim-agent"]` (`pk`, `uuid`, `template`, `calc_p
 
 ## The contract with sim-agent
 
-The routes and the `sim-agent.node/1` payload are defined in sim-agent
-(`src/sim_agent/web/results_api.py`, frssp/sim_agent); sim-agent owns them because it makes
-the data. This plugin checks the `schema` field and refuses a payload it does not read.
-`tests/conftest.py` is a fake backend that follows that payload; change both together.
+The routes and payloads are sim-agent's node API v1 (`sim-agent.nodes/1`), defined in
+frssp/sim_agent `docs/api/node-api-v1.md`; sim-agent owns it because it makes the data. This
+plugin checks the `api` field and refuses a version it does not read. `tests/conftest.py` is a
+fake backend that follows that document; change both together.
 
 ## Tests
 
