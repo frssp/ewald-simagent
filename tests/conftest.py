@@ -8,6 +8,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -48,7 +49,8 @@ NODES = {
 }
 for pk, node in NODES.items():
     node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
-                 "node_type": "", "label": "", "ctime": "2026-10-20T00:00:00+00:00"})
+                 "node_type": "", "label": "", "ctime": f"2026-10-{10 + pk // 100:02d}T00:00:00+00:00"})
+NODES[100]["formula"] = "Si2"
 
 EXTXYZ = ('2\nLattice="5.43 0 0 0 5.43 0 0 0 5.43" Properties=species:S:1:pos:R:3 pbc="T T T"\n'
           "Si 0 0 0\nSi 1.3575 1.3575 1.3575\n")
@@ -103,7 +105,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":  # Basic only mints tokens
             return self._send(401, b'{"status": "error", "message": "sim-agent login required"}')
-        parts = self.path.split("/api/v1/", 1)[1].split("/")
+        route = self.path.split("/api/v1/", 1)[1]
+        if route.split("?")[0] == "nodes":
+            return self._list(parse_qs(urlsplit(route).query))
+        parts = route.split("/")
         if parts == ["whoami"]:
             return self._send(200, json.dumps({"user": USER, "schema": "sim-agent.node/1",
                                                "version": "test"}).encode())
@@ -120,6 +125,26 @@ class Handler(BaseHTTPRequestHandler):
                 and "/".join(parts[3:]) in calcs[int(parts[1])]["files"]):
             return self._send(200, (DATA / "vasprun.xml").read_bytes(), "application/octet-stream")
         self._send(404, json.dumps({"status": "error", "message": "No node among your calculations."}).encode())
+
+
+def _list(self, query):
+    """``GET /nodes``: top-level processes, newest first, ``limit``/``before``/``q``."""
+    rows = [n for n in NODES.values() if n["kind"] == "process"]
+    rows.sort(key=lambda n: n["ctime"], reverse=True)
+    if "before" in query:
+        rows = [n for n in rows if n["ctime"] < query["before"][0]]
+    if "q" in query:
+        q = query["q"][0].lower()
+        rows = [n for n in rows if q in " ".join(str(n.get(k) or "") for k in ("label", "template", "formula")).lower()]
+    limit = int(query.get("limit", ["50"])[0])
+    page = rows[:limit]
+    keys = ("pk", "uuid", "process_label", "template", "label", "description", "process_state", "exit_status",
+            "ctime", "formula")
+    self._send(200, json.dumps({"schema": "sim-agent.node/1", "nodes": [{k: n.get(k) for k in keys} for n in page],
+                                "next": page[-1]["ctime"] if len(rows) > limit else None}).encode())
+
+
+Handler._list = _list
 
 
 @pytest.fixture

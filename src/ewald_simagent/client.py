@@ -247,6 +247,12 @@ class Client:
         """sim-agent's description of one node (PK, UUID or UUID prefix)."""
         return self._check(self.get_json(f"nodes/{urllib.parse.quote(str(node))}"))
 
+    def nodes(self, limit: int = 50, before: str | None = None, q: str | None = None) -> dict:
+        """The user's recent top-level calculations, newest first: ``{"nodes": [...], "next": ...}``
+        (``next`` is the ``before`` of the following page, or None)."""
+        query = {"limit": limit, **({"before": before} if before else {}), **({"q": q} if q else {})}
+        return self._check(self.get_json("nodes?" + urllib.parse.urlencode(query)))
+
     def download(self, path: str, dest: Path) -> Path:
         """Fetch ``path`` into ``dest`` (written whole, then moved in place)."""
         dest.parent.mkdir(parents=True, exist_ok=True)
