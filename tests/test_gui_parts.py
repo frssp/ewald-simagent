@@ -50,19 +50,20 @@ def test_settings_page_takes_a_key_and_checks_it(server):
     assert client.get_connection("lab").token() == TOKEN
 
 
-def test_settings_page_and_tool_are_registered():
+def test_settings_page_and_workflow_source_are_registered():
     from ewald import plugins
 
     assert plugins.settings_pages()["simagent"].title == "sim-agent"
-    assert "simagent:1234" in plugins.tools()["simagent_node"].description
+    src = plugins.workflow_sources()["simagent"]
+    assert src.schemes == ("simagent",) and src.settings_page == "simagent"
 
 
-def test_ai_tool_lists_paths_to_open(connected):
-    from ewald_simagent.tools import simagent_node
+def test_ai_reads_a_calculation_through_ewalds_workflow_tool(connected):
+    from ewald.llm.tools import Toolset
 
-    out = simagent_node(None, "100")
-    assert out["open"] == "simagent:default/00000064-" and out["scalars"]["misc"]["band_gap"] == 0.61
-    assert [s["path"] for s in out["steps"]][:3] == ["simagent:default/00000064-/relax/iteration_01",
-                                                     "simagent:default/00000064-/relax/iteration_02", "simagent:default/00000064-/scf"]
-    assert out["structures"] == [{"path": "simagent:default/00000064-/relaxed_structure", "formula": "Si2"}]
-    assert out["steps"][2]["work_dir"] == "/scratch/alice/103" and "relaxed_structure" in out["listing"]
+    out = Toolset().call("describe_workflow", {"path": "simagent:100"}).content
+    assert out["path"] == "simagent:default/00000064-" and out["scalars"]["band_gap"] == 0.61
+    assert [s["name"] for s in out["steps"]] == ["relax", "scf", "bands"]
+    assert out["steps"][0]["runs"] == 2 and out["steps"][1]["work_dir"] == "/scratch/alice/103"
+    assert {"name": "relaxed_structure", "path": "simagent:default/00000064-/relaxed_structure",
+            "kind": "structure", "note": "Si2"} in out["outputs"]

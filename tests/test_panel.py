@@ -1,91 +1,97 @@
-"""The sim-agent side bar, with a stand-in for EWALD's window (no MainWindow, no display)."""
+"""sim-agent as an EWALD workflow source, and its side bar (EWALD's workflow side bar) with a
+stand-in for the window (no MainWindow, no display)."""
 import os
 
 import pytest
 
-QtWidgets = pytest.importorskip("PySide6.QtWidgets")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+def _names(step):
+    return [s.name for s in step.steps]
 
 
-class Context:
-    def __init__(self):
-        self.opened, self.cells, self.messages, self.callbacks = [], [], [], {}
-        self.window = self
+def test_listing_rows(connected):
+    from ewald_simagent.source import SimAgentWorkflows
 
-    def open_location_dialog(self, path):
-        self.opened.append(path)
-        return path
-
-    def insert_cell(self, code):
-        self.cells.append(code)
-
-    def message(self, text, error=False):
-        self.messages.append(text)
-
-    def on(self, event, callback):
-        self.callbacks.setdefault(event, []).append(callback)
+    src = SimAgentWorkflows()
+    assert src.account().startswith("alice at ")
+    page = src.list()
+    titles = [w.title for w in page.workflows]
+    assert titles[0].startswith("vasp_mlff_training") and "<400>" in titles[0]
+    assert "vasp_bands  Si2  <100>  ✓" in titles and not page.workflows[0].complete
+    assert [w.title for w in src.list(query="bands").workflows] == ["vasp_bands  Si2  <100>  ✓"]
 
 
-@pytest.fixture(scope="module")
-def app():
-    return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+def test_describe_joins_restarts_and_nests_call_paths(connected):
+    from ewald_simagent.source import SimAgentWorkflows
+
+    wf = SimAgentWorkflows().describe("100")
+    assert wf.complete and wf.path == "simagent:default/00000064-" and _names(wf) == ["relax", "scf", "bands"]
+    relax = wf.steps[0]
+    assert relax.runs == 2 and relax.mark() == "✓" and relax.path == "simagent:default/00000064-/relax"
+    chg = next(o for o in relax.outputs if o.name == "CHGCAR")
+    assert chg.note == "on the cluster, over SSH" and chg.path.endswith("/relax/CHGCAR")
+    assert [o.name for o in wf.outputs] == ["relaxed_structure"] and wf.scalars["band_gap"] == 0.61
+    mlff = SimAgentWorkflows().describe("simagent:400")
+    assert _names(mlff) == ["dft"] and _names(mlff.steps[0]) == ["SiO2_000", "SiO2_001", "Si_000"]
+    assert mlff.steps[0].steps[1].runs == 2
 
 
-def _texts(item):
-    return [item.child(i).text(0) for i in range(item.childCount())]
+def test_without_login():
+    from ewald_simagent.source import SimAgentWorkflows
+
+    assert SimAgentWorkflows().account() == ""
 
 
-def test_panel_lists_expands_and_opens(app, connected):
+def test_side_bar_is_ewalds_workflow_panel(connected):
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from ewald import plugins
+
+    if "simagent" not in plugins.workflow_sources():
+        pytest.skip("this EWALD has no workflow sources")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])  # noqa: F841
+
+    class Context:
+        def __init__(self):
+            self.opened, self.workflows, self.cells, self.window = [], [], [], self
+
+        def open(self, path):
+            self.opened.append(path)
+
+        def open_workflow(self, wf):
+            self.workflows.append(wf)
+
+        def insert_cell(self, code):
+            self.cells.append(code)
+
+        def message(self, text, error=False):
+            pass
+
+        def on(self, event, callback):
+            pass
+
     from ewald_simagent.panel import sim_agent
 
     ctx = Context()
     panel = sim_agent(ctx)
     panel.wait()
-    rows = [panel.tree.topLevelItem(i).text(0) for i in range(panel.tree.topLevelItemCount())]
-    assert rows[0].startswith("vasp_mlff_training") and "<400>" in rows[0]
-    assert "vasp_bands  Si2  <100>  ✓" in rows and "alice at" in panel.who.text()
-    wg = next(panel.tree.topLevelItem(i) for i in range(3) if "<100>" in panel.tree.topLevelItem(i).text(0))
+    wg = next(panel.tree.topLevelItem(i) for i in range(panel.tree.topLevelItemCount())
+              if "<100>" in panel.tree.topLevelItem(i).text(0))
     wg.setExpanded(True)
     panel.wait()
-    assert _texts(wg)[:3] == ["relax  (2 runs)  ✓", "scf  ✓", "bands  ✓"] and "relaxed_structure  Si2" in _texts(wg)
-    relax = wg.child(0)
-    assert "CHGCAR  (on the cluster, over SSH)" in _texts(relax)
-    panel.tree.setCurrentItem(relax)
-    assert panel.buttons["Open"].isEnabled()
+    texts = [wg.child(i).text(0) for i in range(wg.childCount())]
+    assert texts[:3] == ["relax  (2 runs)  ✓", "scf  ✓", "bands  ✓"] and "relaxed_structure  (Si2)" in texts
+    panel.tree.setCurrentItem(wg.child(0))
     panel.open()
     panel.insert_cell()
     assert ctx.opened == ["simagent:default/00000064-/relax"]
     assert ctx.cells == ["pipe = load('simagent:default/00000064-/relax')"]
-
-
-def test_panel_search_and_pk(app, connected):
-    from ewald_simagent.panel import sim_agent
-
-    panel = sim_agent(Context())
-    panel.wait()
-    panel.search.setText("bands")
-    panel.refresh()
-    panel.wait()
-    assert panel.tree.topLevelItemCount() == 1
-    panel.search.setText("400")
-    panel.refresh()
-    panel.wait()
-    top = panel.tree.topLevelItem(0)
-    assert "<400>" in top.text(0) and _texts(top) == ["dft/SiO2_000  ✓", "dft/SiO2_001  (2 runs)  ✓", "dft/Si_000  ✓"]
-
-
-def test_panel_without_login(app):
-    from ewald_simagent.panel import sim_agent
-
-    panel = sim_agent(Context())
-    assert "Not logged in" in panel.who.text() and panel.tree.topLevelItemCount() == 0
-    assert panel.login_button.text() == "Log in…"
+    panel.open(wg)
+    assert [w.id for w in ctx.workflows] == ["100"]
 
 
 def test_panel_is_registered():
     from ewald import plugins
 
-    p = plugins.panels().get("simagent")
-    if p is None or p.title == "simagent":
-        pytest.skip("this EWALD does not read panel attributes from entry points yet")
+    p = plugins.panels()["simagent"]
     assert p.title == "sim-agent" and p.icon.startswith("<svg")

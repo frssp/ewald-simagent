@@ -25,8 +25,8 @@ simagent = "ewald_simagent.settings_page:SimAgentSettings"
 [project.entry-points."ewald.panels"]
 simagent = "ewald_simagent.panel:sim_agent"
 
-[project.entry-points."ewald.tools"]
-simagent_node = "ewald_simagent.tools:simagent_node"
+[project.entry-points."ewald.workflows"]
+simagent = "ewald_simagent.source:SimAgentWorkflows"
 
 [project.scripts]
 ewald-simagent = "ewald_simagent.__main__:main"

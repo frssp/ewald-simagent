@@ -32,17 +32,23 @@ The **sim-agent** button on the activity bar (the icon column at the left) opens
 with your recent calculations, newest first. Type a PK or UUID to jump to one, or words to
 search. Expanding a calculation lists its steps (restarts together), their files (CHGCAR and
 LOCPOT read from the cluster) and output structures; a double click opens one, and the buttons
-insert a `load(...)` cell or copy the path. The list is sim-agent's `GET /api/v1/nodes` (newest first, paged with a cursor).
+insert a `load(...)` cell or copy the path. A double click on the calculation itself (a
+WorkGraph) opens it as one notebook: a `load` cell per step (`relax = load(...)`,
+`scf = load(...)`) and `pipe` on the main result. The list is sim-agent's `GET /api/v1/nodes`
+(newest first, paged with a cursor). The side bar is EWALD's workflow side bar
+(`ewald.workflow`); this plugin is its source (`ewald_simagent.source.SimAgentWorkflows`).
 
 1. Plugins side bar › sim-agent results › **Settings** (or Edit › Plugin settings › sim-agent):
    the server address, your login, and either an access key from the web UI (user menu › API
    keys) or your web password, which is used once to make a key and not kept. **Test** checks
    the login, **Log out** forgets it.
 2. File › **Open location…** (Ctrl+L) and type `simagent:1234`, or any path above.
-3. Or ask in Ask AI ("open the bands of 1234"): the `simagent_node` tool lists a node's steps,
-   files and structures with the path for each, and the AI loads the one you want.
+3. Or ask in Ask AI ("open the bands of 1234"): EWALD's `list_workflows` and
+   `describe_workflow` tools list your calculations and a node's steps, files and structures
+   with the path for each, and the AI loads the one you want.
 
-The settings page and Open location need an EWALD with plugin settings pages; with an older one
+The side bar and the AI tools need an EWALD with workflow sources (`ewald.workflow`), the
+settings page and Open location one with plugin settings pages; with an older one
 use `python -m ewald_simagent login` and `load()` in a cell.
 
 ## How it works
