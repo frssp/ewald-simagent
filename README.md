@@ -33,7 +33,7 @@ with your recent calculations, newest first. Type a PK or UUID to jump to one, o
 search. Expanding a calculation lists its steps (restarts together), their files (CHGCAR and
 LOCPOT read from the cluster) and output structures; a double click opens one, and the buttons
 insert a `load(...)` cell or copy the path. A double click on the calculation itself (a
-WorkGraph) opens it as one notebook: a `load` cell per step (`relax = load(...)`,
+WorkGraph) opens it as one notebook: one cell that loads every step (`relax = load(...)`,
 `scf = load(...)`) and `pipe` on the main result. The list is sim-agent's `GET /api/v1/nodes`
 (newest first, paged with a cursor). The side bar is EWALD's workflow side bar
 (`ewald.workflow`); this plugin is its source (`ewald_simagent.source.SimAgentWorkflows`).
