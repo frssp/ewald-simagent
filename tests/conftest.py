@@ -1,6 +1,6 @@
 """A fake sim-agent backend on localhost: the ``/api/v1`` of sim-agent's
-``docs/api/results-api-v1.md`` (``sim-agent.node/1``, Basic or Bearer, tokens minted with
-Basic), answering from :data:`NODES` and serving ``tests/data/vasprun.xml``. Keep it matching
+``docs/api/results-api-v1.md`` (``sim-agent.node/1``: Bearer on every route, Basic only to
+mint a token), answering from :data:`NODES` and serving ``tests/data/vasprun.xml``. Keep it matching
 that document."""
 import base64
 import json
@@ -76,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Handler.requests.append(self.path)
-        if self.headers.get("Authorization") not in (BASIC, f"Bearer {TOKEN}"):
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":  # Basic only mints tokens
             return self._send(401, b'{"status": "error", "message": "sim-agent login required"}')
         parts = self.path.split("/api/v1/", 1)[1].split("/")
         if parts == ["whoami"]:

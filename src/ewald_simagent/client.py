@@ -148,6 +148,9 @@ class Client:
                 what = "password" if self._password is not None else "saved token (expired or revoked?)"
                 raise SimAgentError(f"sim-agent at {self.conn.url} refused the {what} of "
                                     f"{self.conn.user!r}. {self._login_hint()}") from None
+            if exc.code == 429:
+                raise SimAgentError(f"sim-agent at {self.conn.url} is refusing logins for a minute after "
+                                    "several wrong passwords; wait and try again") from None
             if exc.code == 403:
                 raise SimAgentError(f"sim-agent at {self.conn.url} runs without a login, so it serves "
                                     f"no API: {message}") from None
