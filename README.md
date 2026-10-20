@@ -19,7 +19,7 @@ pipe = load("simagent:1234/relax/iteration_02") # one run of a step
 pipe = load("simagent:1234/relaxed_structure")  # an output structure
 pipe = load("simagent:1234/scf/OUTCAR")         # a retrieved file
 pipe = load("simagent:1234/scf/CHGCAR")         # a file left on the cluster, read over SSH
-pipe = load("simagent:lab/1234")                # another saved connection (a full UUID works too)
+pipe = load("simagent:lab/3f9c2e1a")            # another saved connection; a UUID or its beginning
 ```
 
 The same strings work in notebook cells, on the command line (`ewald gui simagent:1234`) and
@@ -27,13 +27,14 @@ in saved notebooks, which store only the string.
 
 ## How it works
 
-Your sim-agent backend (the address you open in the browser) serves a read-only node API
+Your sim-agent backend (the address you open in the browser) serves a read-only results API
 under `/api/v1`, and only for your own calculations: another user's PK answers like a PK that
 does not exist. `login` asks your web password once, trades it for an API token
 (`POST /api/v1/tokens`, 180 days) and keeps only the token. Revoke it in sim-agent when a
 machine should lose access.
 
-Loading a node walks it from the workflow down to every VASP calculation in call order. Files
+For a node it lists the calculations under it in call order, with their retrieved files and
+work directories on the cluster. Files
 AiiDA retrieved (`vasprun.xml`, `OUTCAR`, `CONTCAR`) are downloaded from sim-agent. Files that
 were never retrieved (CHGCAR, LOCPOT) are read from the calculation's work directory through
 EWALD's SSH remote files, so they need the same SSH access to the cluster that
@@ -50,10 +51,10 @@ Every frame carries `attributes["sim-agent"]` (`pk`, `uuid`, `template`, `calc_p
 
 ## The contract with sim-agent
 
-The routes and payloads are sim-agent's node API v1 (`sim-agent.nodes/1`), defined in
-frssp/sim_agent `docs/api/node-api-v1.md`; sim-agent owns it because it makes the data. This
-plugin checks the `api` field and refuses a version it does not read. `tests/conftest.py` is a
-fake backend that follows that document; change both together.
+The routes and the payload are sim-agent's results API v1 (`sim-agent.node/1`), defined in
+frssp/sim_agent `docs/api/results-api-v1.md`; sim-agent owns it because it makes the data.
+This plugin checks the `schema` field and refuses a version it does not read.
+`tests/conftest.py` is a fake backend that follows that document; change both together.
 
 ## Tests
 

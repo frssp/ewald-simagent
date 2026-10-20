@@ -4,7 +4,7 @@ A connection is the address of your own sim-agent backend (``http://server/<you>
 UI's address) and your login name. ``login`` trades the web password once for an API token
 (``POST /api/v1/tokens``); only the token is kept, in the OS keychain through
 :mod:`ewald.keychain` (never in ``<ewald config dir>/simagent.json``, settings.json or
-``os.environ``). The contract is sim-agent's ``docs/api/node-api-v1.md`` (``sim-agent.nodes/1``).
+``os.environ``). The contract is sim-agent's ``docs/api/results-api-v1.md`` (``sim-agent.node/1``).
 Only the standard library speaks HTTP, so the plugin adds no dependency.
 """
 from __future__ import annotations
@@ -20,8 +20,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-#: The ``api`` version of sim-agent's node API this plugin reads.
-API = "sim-agent.nodes/1"
+#: The ``schema`` of sim-agent's ``/api/v1`` this plugin reads.
+SCHEMA = "sim-agent.node/1"
 
 
 class SimAgentError(RuntimeError):
@@ -165,20 +165,18 @@ class Client:
         """A new API token (needs the client made with ``password``)."""
         return self.get_json("tokens", {"name": name, "ttl_days": ttl_days})["token"]
 
-    def whoami(self) -> dict:
-        data = self.get_json("whoami")
-        if data.get("api") != API:
-            raise SimAgentError(f"sim-agent speaks {data.get('api')!r}, this plugin reads {API!r}; "
+    def _check(self, data: dict) -> dict:
+        if data.get("schema") != SCHEMA:
+            raise SimAgentError(f"sim-agent speaks {data.get('schema')!r}, this plugin reads {SCHEMA!r}; "
                                 "update ewald-simagent (or sim-agent)")
         return data
 
+    def whoami(self) -> dict:
+        return self._check(self.get_json("whoami"))
+
     def node(self, node) -> dict:
-        """sim-agent's summary of one node (PK or full UUID)."""
-        data = self.get_json(f"nodes/{urllib.parse.quote(str(node))}")["node"]
-        if data.get("api") != API:
-            raise SimAgentError(f"sim-agent speaks {data.get('api')!r}, this plugin reads {API!r}; "
-                                "update ewald-simagent (or sim-agent)")
-        return data
+        """sim-agent's description of one node (PK, UUID or UUID prefix)."""
+        return self._check(self.get_json(f"nodes/{urllib.parse.quote(str(node))}"))
 
     def download(self, path: str, dest: Path) -> Path:
         """Fetch ``path`` into ``dest`` (written whole, then moved in place)."""
