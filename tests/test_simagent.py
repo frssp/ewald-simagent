@@ -251,3 +251,44 @@ def test_listing_follows_the_cursor(connected):
             break
     assert seen == [400, 300, 100]
     assert [n["pk"] for n in api.nodes(q="mlff")["nodes"]] == [400]
+
+
+@pytest.fixture
+def gateway_timeout_proxy(monkeypatch):
+    """An internet proxy that cannot reach the site server: 504 for everything, as on an office PC."""
+    import http.server
+    import threading
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def _answer(self):
+            self.send_response(504)
+            self.end_headers()
+
+        do_GET = do_POST = _answer
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.setenv(name, url)
+    yield url
+    httpd.shutdown()
+
+
+def test_connects_directly_past_the_pc_proxy_unless_told(server, gateway_timeout_proxy):
+    from ewald_simagent import client
+
+    from .conftest import TOKEN
+
+    direct = client.Connection("default", server, "alice")
+    assert client.login(direct, key=TOKEN)["user"] == "alice"       # HTTP_PROXY ignored
+    for proxy in ("system", gateway_timeout_proxy):
+        with pytest.raises(client.SimAgentError, match="through the proxy .*Leave Proxy empty"):
+            client.Client(client.Connection("p", server, "alice", proxy=proxy), token=TOKEN).whoami()
+    with pytest.raises(client.SimAgentError, match="Proxy 'proxy:3128'"):
+        client.proxies(client.Connection("p", server, "alice", proxy="proxy:3128"))
