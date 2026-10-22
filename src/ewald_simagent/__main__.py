@@ -13,14 +13,21 @@ def main(argv=None):
     login = sub.add_parser("login", help="save a connection to your sim-agent backend")
     login.add_argument("url", help="your sim-agent address, e.g. http://server/alice/")
     login.add_argument("--user", required=True, help="your sim-agent login")
+    login.add_argument("--key", action="store_true",
+                       help="paste an access key made in the web UI (user menu > API keys) instead of "
+                            "typing the web password once to make one")
     login.add_argument("--name", default="default", help="connection name (default: default)")
+    login.add_argument("--allow-http", action="store_true",
+                       help="save a plain http:// address to another machine without asking (the key then "
+                            "crosses the network unencrypted)")
+    login.add_argument("--ca-file", default="", help="CA bundle to trust for a self-signed https certificate")
     login.add_argument("--host", action="append", default=[], metavar="COMPUTER=HOST",
                        help="SSH host for a sim-agent Computer's work directories, e.g. supercom=hpc")
     show = sub.add_parser("show", help="what a node holds and the simagent: path for each part")
     show.add_argument("node", help="PK, UUID or simagent:... path")
     show.add_argument("--connection")
     sub.add_parser("connections", help="saved connections")
-    logout = sub.add_parser("logout", help="forget a connection and its password")
+    logout = sub.add_parser("logout", help="forget a connection and its token (revoke it in sim-agent too)")
     logout.add_argument("name")
     args = parser.parse_args(argv)
 
@@ -29,11 +36,18 @@ def main(argv=None):
     try:
         if args.command == "login":
             hosts = dict(h.split("=", 1) for h in args.host)
-            conn = client.Connection(args.name, args.url, args.user, hosts)
-            password = getpass.getpass(f"sim-agent password for {args.user}: ")
-            who = client.Client(conn, password=password).whoami()
-            client.save_connection(conn, password)
-            print(f"Saved {args.name!r}: {args.url} as {who['user']} (sim-agent {who.get('version')})")
+            conn = client.Connection(client.check_name(args.name), args.url, args.user, hosts, args.ca_file)
+            if client.plain_http(args.url) and not args.allow_http:
+                print(f"Warning: {args.url} is plain http, so the access key (and the password, once) cross "
+                      "the network unencrypted. Use https:// if the server has it.", file=sys.stderr)
+                if input("Save it anyway? [y/N] ").strip().lower() not in ("y", "yes"):
+                    sys.exit("Not saved; use an https:// address, or --allow-http")
+            if args.key:
+                who = client.login(conn, key=getpass.getpass("sim-agent access key (sa_pat_...): "))
+            else:
+                who = client.login(conn, password=getpass.getpass(f"sim-agent web password for {args.user}: "))
+            print(f"Saved {args.name!r}: {args.url} as {who['user']}; the access key is in the keychain, "
+                  "no password is kept")
         elif args.command == "show":
             from . import describe
 

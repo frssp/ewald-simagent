@@ -1,17 +1,19 @@
-"""A fake sim-agent backend on localhost: the ``/api/v1`` routes of sim-agent's
-``web/results_api.py``, answering from :data:`NODES` and serving ``tests/data/vasprun.xml``.
-Payloads follow the ``sim-agent.node/1`` shape that module documents."""
+"""A fake sim-agent backend on localhost: the ``/api/v1`` of sim-agent's
+``docs/api/results-api-v1.md`` (``sim-agent.node/1``: Bearer on every route, Basic only to
+mint a token), answering from :data:`NODES` and serving ``tests/data/vasprun.xml``. Keep it matching
+that document."""
 import base64
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 DATA = Path(__file__).parent / "data"
-USER, PASSWORD = "alice", "s3cret"
+USER, PASSWORD, TOKEN = "alice", "s3cret", "sa_pat_test"
 
 
 def _calc(pk, path, files, state="finished", remote=True):
@@ -24,7 +26,7 @@ def _calc(pk, path, files, state="finished", remote=True):
 
 NODES = {
     100: {"kind": "process", "process_label": "WorkGraph<vasp_bands>", "template": "vasp_bands",
-          "process_state": "finished", "exit_status": 0, "scalars": {"band_gap": 0.61},
+          "process_state": "finished", "exit_status": 0, "scalars": {"misc": {"band_gap": 0.61, "total_energy": -10.8}},
           "structures": [{"link": "relaxed_structure", "pk": 200, "uuid": "c8" * 16, "formula": "Si2"}],
           "calculations": [
               _calc(101, ["relax", "iteration_01"], ["OUTCAR", "vasprun.xml"]),
@@ -36,13 +38,25 @@ NODES = {
           "exit_status": None, "scalars": {}, "structures": [],
           "calculations": [_calc(300, [], ["vasprun.xml"], state="running")]},
     200: {"kind": "structure", "formula": "Si2", "natoms": 2},
+    400: {"kind": "process", "process_label": "WorkGraph<vasp_mlff_training>", "template": "vasp_mlff_training",
+          "process_state": "finished", "exit_status": 0, "scalars": {}, "structures": [],
+          "calculations": [
+              _calc(401, ["dft", "SiO2_000"], ["vasprun.xml"]),
+              _calc(402, ["dft", "SiO2_001", "iteration_01"], ["vasprun.xml"]),
+              _calc(403, ["dft", "SiO2_001", "iteration_02"], ["vasprun.xml"]),
+              _calc(404, ["dft", "Si_000"], ["vasprun.xml"]),
+          ]},
 }
 for pk, node in NODES.items():
     node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
-                 "node_type": "", "label": "", "ctime": "2026-10-20T00:00:00+00:00"})
+                 "node_type": "", "label": "", "ctime": f"2026-10-{10 + pk // 100:02d}T00:00:00+00:00"})
+NODES[100]["formula"] = "Si2"
 
 EXTXYZ = ('2\nLattice="5.43 0 0 0 5.43 0 0 0 5.43" Properties=species:S:1:pos:R:3 pbc="T T T"\n'
           "Si 0 0 0\nSi 1.3575 1.3575 1.3575\n")
+
+
+BASIC = "Basic " + base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,16 +74,48 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _odd(self) -> bool:
+        """``/moved/...`` redirects to another host; ``/portal/...`` answers a login page."""
+        if self.path.startswith("/moved/"):
+            self.send_response(302)
+            self.send_header("Location", "http://sso.example.org/login")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        if self.path.startswith("/portal/"):
+            self._send(200, b"<html>Sign in</html>", "text/html")
+            return True
+        return False
+
+    def do_POST(self):
+        Handler.requests.append(self.path)
+        if self._odd():
+            return
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        if not self.path.endswith("/api/v1/tokens"):
+            return self._send(404, b'{"status": "error", "message": "no such route"}')
+        if self.headers.get("Authorization") != BASIC:
+            return self._send(401, b'{"status": "error", "message": "wrong password"}')
+        self._send(201, json.dumps({"status": "success", "token": TOKEN, "id": "1a2b3c4d",
+                                    "name": body.get("name")}).encode())
+
     def do_GET(self):
         Handler.requests.append(self.path)
-        good = "Basic " + base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
-        if self.headers.get("Authorization") != good:
+        if self._odd():
+            return
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":  # Basic only mints tokens
             return self._send(401, b'{"status": "error", "message": "sim-agent login required"}')
-        parts = self.path.split("/api/v1/", 1)[1].split("/")
+        route = self.path.split("/api/v1/", 1)[1]
+        if route.split("?")[0] == "nodes":
+            return self._list(parse_qs(urlsplit(route).query))
+        parts = route.split("/")
         if parts == ["whoami"]:
             return self._send(200, json.dumps({"user": USER, "schema": "sim-agent.node/1",
                                                "version": "test"}).encode())
         node = NODES.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
+        if node is None and len(parts) > 1:      # a UUID prefix (8 characters at least)
+            found = [n for n in NODES.values() if n["uuid"].startswith(parts[1])]
+            node = found[0] if len(found) == 1 and len(parts[1]) >= 8 else None
         calcs = {c["pk"]: c for n in NODES.values() for c in n.get("calculations", [])}
         if len(parts) == 2 and node is not None:
             return self._send(200, json.dumps(node).encode())
@@ -79,6 +125,30 @@ class Handler(BaseHTTPRequestHandler):
                 and "/".join(parts[3:]) in calcs[int(parts[1])]["files"]):
             return self._send(200, (DATA / "vasprun.xml").read_bytes(), "application/octet-stream")
         self._send(404, json.dumps({"status": "error", "message": "No node among your calculations."}).encode())
+
+
+def _list(self, query):
+    """``GET /nodes``: top-level processes, newest first, ``limit``/``cursor``/``q``."""
+    rows = [n for n in NODES.values() if n["kind"] == "process"]
+    rows.sort(key=lambda n: (n["ctime"], n["pk"]), reverse=True)
+    if "cursor" in query:     # opaque to the client; here the index of the next row
+        rows = rows[int(query["cursor"][0]):]
+        start = int(query["cursor"][0])
+    else:
+        start = 0
+    if "q" in query:
+        q = query["q"][0].lower()
+        fields = ("label", "description", "template", "formula", "process_label")
+        rows = [n for n in rows if q in " ".join(str(n.get(k) or "") for k in fields).lower()]
+    limit = int(query.get("limit", ["50"])[0])
+    page = rows[:limit]
+    keys = ("pk", "uuid", "label", "description", "ctime", "template", "formula", "process_label",
+            "process_state", "exit_status", "exit_message")
+    self._send(200, json.dumps({"schema": "sim-agent.node/1", "nodes": [{k: n.get(k) for k in keys} for n in page],
+                                "next_cursor": str(start + limit) if len(rows) > limit else None}).encode())
+
+
+Handler._list = _list
 
 
 @pytest.fixture
@@ -101,5 +171,5 @@ def _ewald_config(tmp_path, monkeypatch):
 def connected(server):
     from ewald_simagent import client
 
-    client.save_connection(client.Connection("default", server, USER, {}), PASSWORD)
+    client.save_connection(client.Connection("default", server, USER, {}), TOKEN)
     return server

@@ -1,16 +1,20 @@
-"""Saved sim-agent connections and the HTTP client for sim-agent's read-only ``/api/v1``.
+"""Saved sim-agent connections and the HTTP client for sim-agent's read-only node API.
 
-A connection is the address of your own sim-agent backend (``http://server/<you>/``) and your
-web login. Addresses live in ``<ewald config dir>/simagent.json``; the password lives in the
-OS keychain through :mod:`ewald.keychain` (never in that file, settings.json or
-``os.environ``). Only the standard library speaks HTTP, so the plugin adds no dependency.
+A connection is the address of your own sim-agent backend (``http://server/<you>/``, the web
+UI's address) and your login name. ``login`` trades the web password once for an API token
+(``POST /api/v1/tokens``); only the token is kept, in the OS keychain through
+:mod:`ewald.keychain` (never in ``<ewald config dir>/simagent.json``, settings.json or
+``os.environ``). The contract is sim-agent's ``docs/api/results-api-v1.md`` (``sim-agent.node/1``).
+Only the standard library speaks HTTP, so the plugin adds no dependency.
 """
 from __future__ import annotations
 
 import base64
 import json
 import os
+import re
 import shutil
+import ssl
 import tempfile
 import urllib.error
 import urllib.parse
@@ -18,7 +22,7 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-#: The ``schema`` of ``/api/v1/nodes/{node}`` this plugin reads.
+#: The ``schema`` of sim-agent's ``/api/v1`` this plugin reads.
 SCHEMA = "sim-agent.node/1"
 
 
@@ -34,12 +38,14 @@ class Connection:
     #: sim-agent Computer label -> host to use for its work directories (an ``~/.ssh/config``
     #: alias or an EWALD remote profile), when the cluster's own hostname does not work here
     hosts: dict = field(default_factory=dict)
+    #: a CA bundle to trust for this server (a self-signed certificate), "" for the system's
+    ca_file: str = ""
 
     @property
     def secret_name(self) -> str:
         return f"simagent:{self.name}"
 
-    def password(self) -> str | None:
+    def token(self) -> str | None:
         from ewald.keychain import get_secret
 
         return get_secret(self.secret_name)[0]
@@ -83,7 +89,25 @@ def get_connection(name: str | None = None) -> Connection:
     return conns[name]
 
 
-def save_connection(conn: Connection, password: str | None = None, default: bool = True) -> None:
+#: a connection name must not read as a node, or ``simagent:NAME/...`` would mean the node NAME
+_NODE_LIKE = re.compile(r"^(\d+|[0-9a-fA-F-]{4,36})$")
+
+
+def check_name(name: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name or "") or _NODE_LIKE.match(name):
+        raise SimAgentError(f"Connection name {name!r}: use letters, digits, '-', '_' or '.', and not "
+                            "something that reads as a PK or UUID (e.g. 'default', 'lab')")
+    return name
+
+
+def plain_http(url: str) -> bool:
+    """True for ``http://`` to anything but this machine: the key would cross the network unencrypted."""
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme == "http" and parts.hostname not in ("localhost", "127.0.0.1", "::1")
+
+
+def save_connection(conn: Connection, token: str | None = None, default: bool = True) -> None:
+    check_name(conn.name)
     cfg = _read_config()
     entry = asdict(conn)
     entry.pop("name")
@@ -91,10 +115,28 @@ def save_connection(conn: Connection, password: str | None = None, default: bool
     if default or not cfg.get("default"):
         cfg["default"] = conn.name
     _write_config(cfg)
-    if password:
+    if token:
         from ewald.keychain import set_secret
 
-        set_secret(conn.secret_name, password)
+        set_secret(conn.secret_name, token)
+
+
+def login(conn: Connection, key: str | None = None, password: str | None = None) -> dict:
+    """Check ``conn`` with an access key (``key``) or by trading the web ``password`` once for a
+    new key, then save it; returns ``whoami``. Only the key is kept, in the keychain."""
+    if key:
+        token = key.strip()
+    elif password:
+        import socket
+
+        token = Client(conn, password=password).mint_token(f"ewald on {socket.gethostname()}")
+    else:
+        raise SimAgentError("Give an access key (sim-agent web UI: user menu > API keys) or the web password")
+    who = Client(conn, token=token).whoami()
+    if who.get("user") != conn.user:
+        raise SimAgentError(f"That key belongs to {who.get('user')!r}, not {conn.user!r}")
+    save_connection(conn, token)
+    return who
 
 
 def remove_connection(name: str) -> None:
@@ -108,52 +150,109 @@ def remove_connection(name: str) -> None:
     delete_secret(f"simagent:{name}")
 
 
-class Client:
-    """``GET`` requests to one sim-agent backend, with HTTP Basic credentials."""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib would carry the Authorization header to the new host and turn
+    ``POST /tokens`` into a GET. The user fixes the address instead."""
 
-    def __init__(self, conn: Connection, password: str | None = None, timeout: float = 60):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SimAgentError(f"sim-agent at {req.full_url} redirects ({code}) to {newurl}; use that "
+                            "address for the connection (Plugin settings › sim-agent, or login again)")
+
+
+class Client:
+    """Requests to one sim-agent backend: ``Bearer`` with the saved token, or ``Basic`` with
+    ``password`` (only to mint a token)."""
+
+    def __init__(self, conn: Connection, password: str | None = None, token: str | None = None,
+                 timeout: float = 60):
         self.conn = conn
         self.base = conn.url.rstrip("/") + "/api/v1/"
         self.timeout = timeout
-        self._password = password
+        self._password, self._token = password, token
+        context = ssl.create_default_context(cafile=conn.ca_file or None)
+        self._opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context))
 
-    def _request(self, path: str):
-        req = urllib.request.Request(self.base + path)
-        password = self._password if self._password is not None else self.conn.password()
-        if password is not None:
-            token = base64.b64encode(f"{self.conn.user}:{password}".encode()).decode()
-            req.add_header("Authorization", f"Basic {token}")
+    def _login_hint(self) -> str:
+        return f"Run: python -m ewald_simagent login {self.conn.url} --user {self.conn.user}"
+
+    def _request(self, path: str, body: dict | None = None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method="POST" if data else "GET")
+        if data:
+            req.add_header("Content-Type", "application/json")
+        if self._password is not None:
+            basic = base64.b64encode(f"{self.conn.user}:{self._password}".encode()).decode()
+            req.add_unredirected_header("Authorization", f"Basic {basic}")
+        else:
+            token = self._token or self.conn.token()
+            if token is None:
+                raise SimAgentError(f"No sim-agent token saved for {self.conn.name!r}. {self._login_hint()}")
+            req.add_unredirected_header("Authorization", f"Bearer {token}")
         try:
-            return urllib.request.urlopen(req, timeout=self.timeout)
+            return self._opener.open(req, timeout=self.timeout)
         except urllib.error.HTTPError as exc:
             try:
                 message = json.loads(exc.read().decode()).get("message", "")
             except (OSError, ValueError, AttributeError):
                 message = ""
             if exc.code == 401:
-                raise SimAgentError(
-                    f"sim-agent at {self.conn.url} refused the login of {self.conn.user!r}. "
-                    f"Run: python -m ewald_simagent login {self.conn.url} --user {self.conn.user}"
-                ) from None
+                what = "password" if self._password is not None else "saved token (expired or revoked?)"
+                raise SimAgentError(f"sim-agent at {self.conn.url} refused the {what} of "
+                                    f"{self.conn.user!r}. {self._login_hint()}") from None
+            if exc.code == 429:
+                raise SimAgentError(f"sim-agent at {self.conn.url} is refusing logins for a minute after "
+                                    "several wrong passwords; wait and try again") from None
+            if exc.code == 403:
+                raise SimAgentError(f"sim-agent at {self.conn.url} runs without a login, so it serves "
+                                    f"no API: {message}") from None
+            if exc.code == 400:
+                raise SimAgentError(message or f"sim-agent refused the request {path}") from None
+            if exc.code == 503:
+                raise SimAgentError(f"sim-agent at {self.conn.url} cannot answer now: {message}") from None
             if exc.code == 404:
                 raise SimAgentError(message or f"Not found on sim-agent: {path}") from None
             raise SimAgentError(f"sim-agent answered {exc.code} for {path}: {message}") from None
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, ssl.SSLCertVerificationError):
+                raise SimAgentError(f"sim-agent at {self.conn.url}: the certificate is not trusted "
+                                    f"({exc.reason.verify_message}); give its CA file in the connection") from None
             raise SimAgentError(f"Cannot reach sim-agent at {self.conn.url}: {exc.reason}") from None
 
-    def get_json(self, path: str) -> dict:
-        with self._request(path) as resp:
-            return json.loads(resp.read().decode())
+    def get_json(self, path: str, body: dict | None = None) -> dict:
+        with self._request(path, body) as resp:
+            ctype = resp.headers.get("Content-Type", "")
+            raw = resp.read()
+        try:
+            if "json" not in ctype:
+                raise ValueError(ctype)
+            return json.loads(raw.decode())
+        except ValueError:
+            raise SimAgentError(f"{self.conn.url} answered {path} with {ctype or 'something'} instead of "
+                                "sim-agent's API (a login page or another site?); check the address") from None
 
-    def whoami(self) -> dict:
-        return self.get_json("whoami")
+    def mint_token(self, name: str, ttl_days: int = 180) -> str:
+        """A new API token (needs the client made with ``password``)."""
+        return self.get_json("tokens", {"name": name, "ttl_days": ttl_days})["token"]
 
-    def node(self, node) -> dict:
-        data = self.get_json(f"nodes/{urllib.parse.quote(str(node))}")
+    def _check(self, data: dict) -> dict:
         if data.get("schema") != SCHEMA:
             raise SimAgentError(f"sim-agent speaks {data.get('schema')!r}, this plugin reads {SCHEMA!r}; "
                                 "update ewald-simagent (or sim-agent)")
         return data
+
+    def whoami(self) -> dict:
+        return self._check(self.get_json("whoami"))
+
+    def node(self, node) -> dict:
+        """sim-agent's description of one node (PK, UUID or UUID prefix)."""
+        return self._check(self.get_json(f"nodes/{urllib.parse.quote(str(node))}"))
+
+    def nodes(self, limit: int = 50, cursor: str | None = None, q: str | None = None) -> dict:
+        """The user's calculations, newest first: ``{"nodes": [...], "next_cursor": ...}``. Pass
+        ``next_cursor`` back as ``cursor`` for the next page (None on the last). A page with ``q``
+        may hold fewer than ``limit`` rows, even none, and still have a next one."""
+        query = {"limit": limit, **({"cursor": cursor} if cursor else {}), **({"q": q} if q else {})}
+        return self._check(self.get_json("nodes?" + urllib.parse.urlencode(query)))
 
     def download(self, path: str, dest: Path) -> Path:
         """Fetch ``path`` into ``dest`` (written whole, then moved in place)."""

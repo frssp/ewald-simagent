@@ -15,10 +15,10 @@ the VASP files are read with EWALD's own readers. :func:`describe` shows what a 
 """
 from .client import Client, Connection, SimAgentError, connections, get_connection
 from .resolve import resolve
-from .uri import SimAgentURI, parse
+from .uri import SimAgentURI, parse, stable
 
 __all__ = ["Client", "Connection", "SimAgentError", "SimAgentURI", "connections", "describe",
-           "get_connection", "parse", "resolve"]
+           "get_connection", "parse", "resolve", "stable"]
 __version__ = "0.1.0"
 
 
@@ -28,7 +28,7 @@ def describe(node, connection: str | None = None) -> str:
     uri = parse(node if str(node).startswith("simagent:") else f"simagent:{node}")
     conn = get_connection(connection or uri.connection)
     desc = Client(conn).node(uri.node)
-    head = f"simagent:{conn.name}/{desc['pk']}" if connection or uri.connection else f"simagent:{desc['pk']}"
+    head = stable(conn.name, desc["uuid"])
     if desc["kind"] != "process":
         return f"{desc.get('formula') or desc['node_type']} <{desc['pk']}>  -> load({head!r})"
     lines = [f"{desc.get('process_label')} <{desc['pk']}> [{desc.get('process_state')}, exit "
