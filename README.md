@@ -108,3 +108,7 @@ pytest
 ```
 
 The tests run a fake sim-agent backend on localhost; no AiiDA or sim-agent install is needed.
+
+## License
+
+MIT, like the rest of the EWALD plugins ([LICENSE](LICENSE)).
