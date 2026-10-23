@@ -1,6 +1,6 @@
 id = "simagent"
 display-name = "sim-agent results"
-version = "0.1.1"
+version = "0.2.0"
 publisher = "frssp"
 description = "Open your finished sim-agent calculations by AiiDA PK (load(\"simagent:1234\")): trajectories, structures and VASP files, retrieved or on the cluster. Read-only."
 requires-ewald = ">=0.1"
