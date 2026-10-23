@@ -51,6 +51,12 @@ class SimAgentWorkflows:
             page = api.nodes(limit=50, cursor=page["next_cursor"], q=query)
         return WorkflowPage([row(n, conn) for n in page.get("nodes", [])], next=page.get("next_cursor"))
 
+    def analyses(self, wf: Workflow) -> list:
+        """Notebook analyses for a described workflow, by its template (:mod:`.analyses`)."""
+        from .analyses import analyses
+
+        return analyses(wf)
+
     def describe(self, ref: str) -> Workflow:
         text = str(ref)
         uri = parse(text if text.startswith("simagent:") else f"simagent:{text}")

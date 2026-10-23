@@ -21,6 +21,9 @@ def main(argv=None):
                        help="save a plain http:// address to another machine without asking (the key then "
                             "crosses the network unencrypted)")
     login.add_argument("--ca-file", default="", help="CA bundle to trust for a self-signed https certificate")
+    login.add_argument("--proxy", default="",
+                       help="'system' for the HTTP(S)_PROXY / OS proxy, or http://host:port (default: "
+                            "connect directly)")
     login.add_argument("--host", action="append", default=[], metavar="COMPUTER=HOST",
                        help="SSH host for a sim-agent Computer's work directories, e.g. supercom=hpc")
     show = sub.add_parser("show", help="what a node holds and the simagent: path for each part")
@@ -36,7 +39,9 @@ def main(argv=None):
     try:
         if args.command == "login":
             hosts = dict(h.split("=", 1) for h in args.host)
-            conn = client.Connection(client.check_name(args.name), args.url, args.user, hosts, args.ca_file)
+            conn = client.Connection(client.check_name(args.name), args.url, args.user, hosts, args.ca_file,
+                                     args.proxy)
+            client.proxies(conn)
             if client.plain_http(args.url) and not args.allow_http:
                 print(f"Warning: {args.url} is plain http, so the access key (and the password, once) cross "
                       "the network unencrypted. Use https:// if the server has it.", file=sys.stderr)

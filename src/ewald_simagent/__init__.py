@@ -14,11 +14,12 @@ sim-agent serves only your own calculations (``/api/v1`` of your backend, your w
 the VASP files are read with EWALD's own readers. :func:`describe` shows what a node holds.
 """
 from .client import Client, Connection, SimAgentError, connections, get_connection
+from .reader import local_file
 from .resolve import resolve
 from .uri import SimAgentURI, parse, stable
 
 __all__ = ["Client", "Connection", "SimAgentError", "SimAgentURI", "connections", "describe",
-           "get_connection", "parse", "resolve", "stable"]
+           "get_connection", "local_file", "parse", "resolve", "stable"]
 __version__ = "0.1.0"
 
 

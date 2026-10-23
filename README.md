@@ -76,8 +76,10 @@ Use the server's `https://` address when it has one. A plain `http://` address t
 machine sends the key unencrypted, so `login` asks before saving it (`--allow-http` skips the
 question; the settings page has Allow plain http). For a self-signed certificate give its CA
 bundle (`--ca-file`, or CA file in the settings). The plugin does not follow redirects, so a key
-never goes to another host; it tells you the address to use instead. On a PC with `HTTP_PROXY`
-set, add the server to `NO_PROXY`, or requests (and the key) go through the proxy. The address
+never goes to another host; it tells you the address to use instead. The plugin connects to the
+server directly and ignores `HTTP_PROXY` and the OS proxy, because a PC's internet proxy often cannot
+reach a site server (it answers 504) while the browser goes direct. Set Proxy to `system`
+(`--proxy system`) or `http://host:port` when the server is only reachable through one. The address
 and login name are in `<ewald config>/simagent.json`; the access key is in the OS keychain
 (`ewald.keychain`), never in that file, settings.json or the environment.
 
@@ -92,6 +94,23 @@ structure in an MLFF workflow, opens its first one and warns with the paths of t
 
 `show` and the AI tool give paths as `simagent:CONNECTION/UUID-PREFIX`: a PK is unique only in
 one server's database, so that is the form to keep in a notebook.
+
+## Analyses
+
+Some templates come with an analysis that the opened notebook ends with, written as ordinary
+cells you can read and change (`src/ewald_simagent/analyses.py`, one recipe per template). For
+`vasp_band_offset` it is the potential lineup: the cells load `interface_static`,
+`ref_substrate_static` and `ref_film_static`, read their retrieved `locpot_planar_avg.json` (no
+LOCPOT needed) and `vasprun.xml`, tell substrate from film atoms by plane composition against
+the two bulk references, take each side's macroscopic-average window from its bulk cell, and
+move each bulk's VBM and CBM by its plateau shift (V̄ interface plateau minus V̄ bulk); E_F is
+the interface's. The last cell leaves `band_offset`, a table of the planar and macroscopic
+average with the levels and the band offset or Schottky barriers in its attributes. The numbers
+are computed in EWALD (`ewald.potential`), not taken from sim-agent's finalize step, which the
+API does not serve; a workflow without one of the three statics or their files gets the reason
+instead. In the AI side bar, "draw the potential with VBM, CBM and E_F" runs these cells
+(`add_analysis`). Needs an EWALD with `ewald.potential`; an older one opens the workflow without
+the analysis.
 
 ## The contract with sim-agent
 

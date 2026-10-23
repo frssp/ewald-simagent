@@ -40,6 +40,11 @@ class Connection:
     hosts: dict = field(default_factory=dict)
     #: a CA bundle to trust for this server (a self-signed certificate), "" for the system's
     ca_file: str = ""
+    #: "" connects directly; "system" uses the HTTP(S)_PROXY / OS proxy; or a proxy URL.
+    #: Direct by default: a sim-agent server is on the site network, and the proxy a PC has for
+    #: the internet often cannot reach it (a 504 from the proxy) while the browser's PAC file
+    #: sends the server direct.
+    proxy: str = ""
 
     @property
     def secret_name(self) -> str:
@@ -106,6 +111,19 @@ def plain_http(url: str) -> bool:
     return parts.scheme == "http" and parts.hostname not in ("localhost", "127.0.0.1", "::1")
 
 
+def proxies(conn: Connection) -> dict | None:
+    """The proxies ``conn`` goes through: ``{}`` for none, ``None`` for the system's."""
+    proxy = (conn.proxy or "").strip()
+    if not proxy:
+        return {}
+    if proxy == "system":
+        return None
+    if not proxy.startswith(("http://", "https://")):
+        raise SimAgentError(f"Proxy {proxy!r}: give an http://host:port address, 'system', or nothing "
+                            "to connect directly")
+    return {"http": proxy, "https": proxy}
+
+
 def save_connection(conn: Connection, token: str | None = None, default: bool = True) -> None:
     check_name(conn.name)
     cfg = _read_config()
@@ -170,7 +188,22 @@ class Client:
         self.timeout = timeout
         self._password, self._token = password, token
         context = ssl.create_default_context(cafile=conn.ca_file or None)
-        self._opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context))
+        handlers = [_NoRedirect, urllib.request.HTTPSHandler(context=context)]
+        chosen = proxies(conn)
+        if chosen is not None:
+            handlers.append(urllib.request.ProxyHandler(chosen))
+        self._opener = urllib.request.build_opener(*handlers)
+
+    def _via(self) -> str:
+        """" through the proxy URL" when requests to the server go through one, else ""."""
+        chosen = proxies(self.conn)
+        if chosen is None:
+            host = urllib.parse.urlsplit(self.conn.url).hostname or ""
+            if urllib.request.proxy_bypass(host):
+                return ""
+            chosen = urllib.request.getproxies()
+        proxy = chosen.get(urllib.parse.urlsplit(self.conn.url).scheme)
+        return f" through the proxy {proxy}" if proxy else ""
 
     def _login_hint(self) -> str:
         return f"Run: python -m ewald_simagent login {self.conn.url} --user {self.conn.user}"
@@ -211,12 +244,20 @@ class Client:
                 raise SimAgentError(f"sim-agent at {self.conn.url} cannot answer now: {message}") from None
             if exc.code == 404:
                 raise SimAgentError(message or f"Not found on sim-agent: {path}") from None
+            if exc.code in (502, 504) and self._via():
+                raise SimAgentError(f"{exc.code} for {path}{self._via()}: the proxy could not reach "
+                                    f"{self.conn.url}. Leave Proxy empty in the connection to connect "
+                                    "directly") from None
+            if exc.code in (502, 504):
+                raise SimAgentError(f"sim-agent at {self.conn.url} answered {exc.code} for {path}: the web "
+                                    "server in front of it got no answer from your sim-agent backend "
+                                    "(is it running?)") from None
             raise SimAgentError(f"sim-agent answered {exc.code} for {path}: {message}") from None
         except urllib.error.URLError as exc:
             if isinstance(exc.reason, ssl.SSLCertVerificationError):
                 raise SimAgentError(f"sim-agent at {self.conn.url}: the certificate is not trusted "
                                     f"({exc.reason.verify_message}); give its CA file in the connection") from None
-            raise SimAgentError(f"Cannot reach sim-agent at {self.conn.url}: {exc.reason}") from None
+            raise SimAgentError(f"Cannot reach sim-agent at {self.conn.url}{self._via()}: {exc.reason}") from None
 
     def get_json(self, path: str, body: dict | None = None) -> dict:
         with self._request(path, body) as resp:
