@@ -46,7 +46,10 @@ WorkGraph) opens it as one notebook: one cell that loads every step (`relax = lo
 2. File › **Open location…** (Ctrl+L) and type `simagent:1234`, or any path above.
 3. Or ask in Ask AI ("open the bands of 1234"): EWALD's `list_workflows` and
    `describe_workflow` tools list your calculations and a node's steps, files and structures
-   with the path for each, and the AI loads the one you want.
+   with the path for each, and the AI loads the one you want. `list_workflows` filters by
+   formula (any ratio, so `TiN` finds the Hill formula `N4Ti4`), status and day, and
+   `open_workflow` opens a step or file by name: "open the TiN calculation that finished
+   yesterday" works without a sim-agent specific tool (EWALD with `workflow.find`).
 
 The side bar and the AI tools need an EWALD with workflow sources (`ewald.workflow`), the
 settings page and Open location one with plugin settings pages; with an older one
