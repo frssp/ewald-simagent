@@ -8,9 +8,17 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from ewald.plugin_api import SettingsField
+from ewald.plugin_api import SettingsField as _SettingsField
 
 from . import client
+
+
+def SettingsField(*args, advanced=False, **kw):
+    """``SettingsField``, folded under Advanced where this EWALD can (``advanced`` is newer)."""
+    try:
+        return _SettingsField(*args, advanced=advanced, **kw)
+    except TypeError:
+        return _SettingsField(*args, **kw)
 
 
 def _hosts(text: str) -> dict:
@@ -40,15 +48,15 @@ class SimAgentSettings:
                       help="Made in sim-agent's web UI under user menu › API keys"),
         SettingsField("password", "or web password", kind="secret", placeholder="used once, never stored",
                       help="Instead of a key: ewald uses it once to make a key (180 days) and forgets it"),
-        SettingsField("hosts", "SSH hosts", kind="multiline", placeholder="supercom=hpc",
+        SettingsField("hosts", "SSH hosts", kind="multiline", placeholder="supercom=hpc", advanced=True,
                       help="One COMPUTER=HOST per line when a cluster's own hostname does not work "
                            "here (an ~/.ssh/config alias or an EWALD remote computer)"),
         SettingsField("allow_http", "Allow plain http", kind="bool",
                       help="An http:// address to another machine sends the key unencrypted; tick this "
                            "only when the server has no https"),
-        SettingsField("ca_file", "CA file", placeholder="optional",
+        SettingsField("ca_file", "CA file", placeholder="optional", advanced=True,
                       help="CA bundle to trust when the server's https certificate is self-signed"),
-        SettingsField("name", "Connection name", default="default",
+        SettingsField("name", "Connection name", default="default", advanced=True,
                       help="Keep several servers under different names; simagent:NAME/1234 picks one"),
     )
     actions: ClassVar[dict] = {"Diagnose": "diagnose", "Log out": "logout"}

@@ -317,17 +317,27 @@ def report(checks: list[Check]) -> str:
 
 
 def report_html(checks: list[Check]) -> str:
-    """The checks as a small table for a Qt label: a colored mark per step, the fix under a failed
-    or doubtful step. Everything from the server (a page title) is escaped."""
-    rows = []
+    """The checks for a Qt label, short: the steps that passed on one line, then each doubtful or
+    failed step with its fix under it. Everything from the server (a page title) is escaped."""
+    def mark(status):
+        return f'<b style="color:{COLORS[status]}">{MARKS[status]}</b>'
+
+    def took(c):
+        return f' <span style="color:{COLORS["skip"]}">{c.seconds * 1000:.0f} ms</span>' \
+            if c.seconds is not None and c.step in ("Connect", "Backend", "Access key") else ""
+
+    passed = [c for c in checks if c.status in ("ok", "skip")]
+    lines = []
+    if passed:
+        lines.append(mark("ok") + " " + " · ".join(html.escape(c.step) + took(c) for c in passed))
     for c in checks:
-        took = f' <span style="color:{COLORS["skip"]}">{c.seconds * 1000:.0f} ms</span>' \
-            if c.seconds is not None else ""
-        rows.append(f'<tr><td style="color:{COLORS[c.status]}"><b>{MARKS[c.status]}</b></td>'
-                    f"<td><b>{html.escape(c.step)}</b></td><td>{html.escape(c.detail)}{took}</td></tr>")
-        if c.hint:
-            rows.append(f'<tr><td></td><td></td><td style="color:{COLORS[c.status]}">'
-                        f"→ {html.escape(c.hint)}</td></tr>")
-    color = COLORS["fail"] if not ok(checks) else COLORS["ok"]
-    return (f'<table cellspacing="0" cellpadding="2">{"".join(rows)}</table>'
-            f'<p style="color:{color}"><b>{html.escape(verdict(checks))}</b></p>')
+        if c.status in ("warn", "fail"):
+            lines.append(f"{mark(c.status)} <b>{html.escape(c.step)}</b>: {html.escape(c.detail)}{took(c)}")
+            if c.hint:
+                lines.append(f'<span style="color:{COLORS[c.status]}">&nbsp;&nbsp;&nbsp;→ '
+                             f"{html.escape(c.hint)}</span>")
+    account = next((c for c in checks if c.step == "Account" and c.status == "ok"), None)
+    color = COLORS["ok"] if ok(checks) else COLORS["fail"]
+    tail = f" {html.escape(account.detail)}" if account else ""
+    lines.append(f'<b style="color:{color}">{html.escape(verdict(checks))}</b>{tail}')
+    return "<br>".join(lines)
