@@ -56,6 +56,9 @@ class SimAgentSettings:
                            "only when the server has no https"),
         SettingsField("ca_file", "CA file", placeholder="optional", advanced=True,
                       help="CA bundle to trust when the server's https certificate is self-signed"),
+        SettingsField("proxy", "Proxy", placeholder="empty: connect directly", advanced=True,
+                      help="'system' for the HTTP(S)_PROXY / OS proxy, or http://host:port. Empty "
+                           "connects directly, as the browser usually does for a site server"),
         SettingsField("name", "Connection name", default="default", advanced=True,
                       help="Keep several servers under different names; simagent:NAME/1234 picks one"),
     )
@@ -73,7 +76,7 @@ class SimAgentSettings:
             return {}
         return {"url": conn.url, "user": conn.user, "key": conn.token() is not None, "password": False,
                 "hosts": "\n".join(f"{c}={h}" for c, h in conn.hosts.items()), "name": conn.name,
-                "allow_http": client.plain_http(conn.url), "ca_file": conn.ca_file}
+                "allow_http": client.plain_http(conn.url), "ca_file": conn.ca_file, "proxy": conn.proxy}
 
     def save(self, values: dict) -> str:
         url, user = values["url"].strip(), values["user"].strip()
@@ -87,7 +90,9 @@ class SimAgentSettings:
                              "https://, or tick Allow plain http if the server has no https")
         ca_file = values.get("ca_file", "").strip()
         try:
-            conn = client.Connection(client.check_name(name), url, user, _hosts(values.get("hosts", "")), ca_file)
+            conn = client.Connection(client.check_name(name), url, user, _hosts(values.get("hosts", "")), ca_file,
+                                     values.get("proxy", "").strip())
+            client.proxies(conn)
         except client.SimAgentError as exc:
             raise ValueError(str(exc)) from None
         old = self._current(name)
@@ -95,7 +100,7 @@ class SimAgentSettings:
             if values.get("key") or values.get("password"):
                 who = client.login(conn, key=values.get("key") or None, password=values.get("password") or None)
             elif old is not None and old.name == name and old.token() and (old.url, old.user) == (conn.url, conn.user):
-                client.save_connection(conn)            # only the hosts or nothing changed: keep the key
+                client.save_connection(conn)            # only hosts, proxy or nothing changed: keep the key
                 who = client.Client(conn).whoami()
             else:
                 raise ValueError("Paste an access key (sim-agent web UI: user menu › API keys) or enter "
@@ -115,7 +120,7 @@ class SimAgentSettings:
             return "Not logged in yet: fill in the fields and Save"
         return diagnose.report_html(diagnose.diagnose(conn))
 
-    test = diagnose      # the button was called Test before 0.1.1
+    test = diagnose      # the button was called Test before 0.2.1
 
     def logout(self, values: dict) -> str:
         name = values.get("name", "").strip() or "default"

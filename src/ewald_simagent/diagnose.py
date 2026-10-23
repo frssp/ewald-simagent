@@ -4,7 +4,7 @@ how long it took and what to do when it fails.
 ``python -m ewald_simagent doctor`` and the **Diagnose** button of the settings page run
 :func:`diagnose`. The steps tell apart the problems seen in practice: a name that does not
 resolve, a firewall or VPN, an office proxy that answers for the server (a 403 block page or a
-504; the fix is ``NO_PROXY``), a backend process that stopped answering behind nginx (504; the
+504; the fix is connecting directly), a backend process that stopped answering behind nginx (504; the
 fix is restarting it), and an access key that expired or was revoked. Read-only: it sends one
 request without credentials and one ``whoami`` with the saved key, nothing else.
 """
@@ -55,18 +55,41 @@ def _restart_hint(conn: client.Connection) -> str:
 
 
 def route(conn: client.Connection) -> tuple[str | None, str]:
-    """The proxy requests to ``conn`` go through (None: direct) and where that choice comes from.
-    The same lookup urllib's default ``ProxyHandler`` makes for :class:`client.Client`."""
+    """The proxy requests to ``conn`` go through (None: direct) and where that choice comes from,
+    following :func:`client.proxies`: an empty Proxy connects directly, ``system`` makes the
+    lookup urllib's default ``ProxyHandler`` makes, anything else is the proxy."""
     parts = urllib.parse.urlsplit(conn.url)
+    setting = (conn.proxy or "").strip()
+    if not setting:
+        system = urllib.request.getproxies().get(parts.scheme)
+        return None, ("Proxy is empty, so this PC's proxy " + (f"{system} " if system else "") +
+                      "is not used")
     netloc = parts.netloc.rsplit("@", 1)[-1]
+    if setting != "system":        # urllib skips even a given proxy for a NO_PROXY host
+        if urllib.request.proxy_bypass(netloc):
+            return None, f"NO_PROXY covers {parts.hostname}, so the connection's Proxy is skipped"
+        return setting, "the connection's Proxy"
     env = urllib.request.getproxies_environment()
     proxy = urllib.request.getproxies().get(parts.scheme)
-    source = f"{parts.scheme.upper()}_PROXY" if env.get(parts.scheme) else "the OS proxy settings"
+    source = f"Proxy = system: {parts.scheme.upper()}_PROXY" if env.get(parts.scheme) else \
+        "Proxy = system: the OS proxy settings"
     if not proxy:
-        return None, "no proxy is set for this PC"
+        return None, "Proxy = system, and no proxy is set for this PC"
     if urllib.request.proxy_bypass(netloc):
-        return None, f"NO_PROXY (or the OS bypass list) covers {parts.hostname}"
+        return None, f"Proxy = system, and NO_PROXY (or the OS bypass list) covers {parts.hostname}"
     return proxy, source
+
+
+#: where the Proxy setting is
+PROXY_SETTING = "Plugin settings › sim-agent › Advanced › Proxy"
+
+
+def _direct_fix(conn: client.Connection) -> str:
+    """How to stop going through the proxy for this server."""
+    host = urllib.parse.urlsplit(conn.url).hostname
+    if (conn.proxy or "").strip() == "system":
+        return f"empty {PROXY_SETTING} to connect directly (or add {host} to NO_PROXY)"
+    return f"empty {PROXY_SETTING} to connect directly"
 
 
 def _html_title(body: bytes) -> str:
@@ -119,12 +142,16 @@ def diagnose(conn: client.Connection | str | None = None, timeout: float = 10) -
     else:
         add("Address", "ok", f"{parts.scheme}://{host}:{port}")
 
+    try:
+        client.proxies(conn)
+    except client.SimAgentError as exc:
+        add("Proxy", "fail", str(exc), f"Fix {PROXY_SETTING}")
+        return checks
     proxy, why = route(conn)
     if proxy:
         add("Proxy", "warn", f"requests go through {proxy} ({why})",
-            f"An office proxy is for the internet and often blocks or cannot reach a site server (a 403 "
-            f"block page or 504). If a later step fails, add {host} to NO_PROXY (Windows: user "
-            "environment variable) and restart EWALD")
+            "An office proxy is for the internet and often blocks or cannot reach a site server (a 403 "
+            f"block page or 504). If a later step fails, {_direct_fix(conn)}")
     else:
         add("Proxy", "ok", f"direct ({why})")
 
@@ -181,8 +208,7 @@ def diagnose(conn: client.Connection | str | None = None, timeout: float = 10) -
     except OSError as exc:
         add("Connect", "fail", f"the {what} {target[0]}:{target[1]} refused or is unreachable ({exc})",
             "Nothing listens on that port: check the address and port, or whether the server (nginx) is up"
-            if what == "server" else "The proxy is down; or connect directly by adding "
-            f"{host} to NO_PROXY", seconds=time.perf_counter() - t0)
+            if what == "server" else f"The proxy is down; or {_direct_fix(conn)}", seconds=time.perf_counter() - t0)
         return checks
 
     if not _backend(conn, proxy, timeout, add):
@@ -215,8 +241,8 @@ def _backend(conn, proxy, timeout, add) -> bool:
         if isinstance(reason, TimeoutError) or "timed out" in str(reason):
             add("Backend", "fail", f"connected, but no answer to /api/v1 in {timeout:g} s{via}",
                 _restart_hint(conn) if not proxy else
-                f"The proxy may be holding the request: add {urllib.parse.urlsplit(conn.url).hostname} "
-                "to NO_PROXY. If it is already direct: " + _restart_hint(conn), seconds=took)
+                f"The proxy may be holding the request: {_direct_fix(conn)}. If it is already direct: "
+                + _restart_hint(conn), seconds=took)
         else:
             add("Backend", "fail", f"request failed{via}: {reason}", seconds=took)
         return False
@@ -235,8 +261,8 @@ def _backend(conn, proxy, timeout, add) -> bool:
         return True
     if code in (502, 504):
         if proxy:
-            hint = (f"Probably the proxy, not sim-agent: it could not reach {host}. Add {host} to NO_PROXY "
-                    "and restart EWALD; if it is still 504 when direct, " + _restart_hint(conn))
+            hint = (f"Probably the proxy, not sim-agent: it could not reach {host}. {_direct_fix(conn)}; "
+                    "if it is still 504 when direct: " + _restart_hint(conn))
         else:
             hint = _restart_hint(conn)
         add("Backend", "fail", f"{code} {'Gateway Timeout' if code == 504 else 'Bad Gateway'}{via}", hint,
@@ -245,8 +271,7 @@ def _backend(conn, proxy, timeout, add) -> bool:
     if data is None and "html" in ctype:
         title = _html_title(body)
         if proxy:
-            hint = (f"That page comes from the proxy (a block page), not sim-agent: add {host} to NO_PROXY "
-                    "and restart EWALD")
+            hint = f"That page comes from the proxy (a block page), not sim-agent: {_direct_fix(conn)}"
         else:
             hint = ("Not sim-agent's API: check the address (it ends with your login, as in the browser: "
                     "http://server/alice/)")

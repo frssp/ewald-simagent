@@ -41,8 +41,8 @@ def _serve(status, body, ctype):
     return srv
 
 
-def _save(url, token=TOKEN):
-    conn = client.Connection("default", url, USER, {})
+def _save(url, token=TOKEN, proxy=""):
+    conn = client.Connection("default", url, USER, {}, proxy=proxy)
     client.save_connection(conn, token)
     return conn
 
@@ -102,23 +102,40 @@ def test_a_backend_that_never_answers():
     assert step.status == "fail" and "no answer" in step.detail and "restart" in step.hint
 
 
-def test_an_office_proxy_block_page_says_no_proxy(server, monkeypatch):
+def test_an_office_proxy_block_page_says_connect_directly(server, monkeypatch):
     proxy = _serve(403, "<html><head><title>전사 차단</title></head></html>".encode(), "text/html; charset=utf-8")
-    monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_address[1]}")
-    _save(server)
+    proxy_url = f"http://127.0.0.1:{proxy.server_address[1]}"
+    monkeypatch.setenv("http_proxy", proxy_url)
     try:
+        _save(server)                                  # Proxy empty: the PC's proxy is not used
         steps = _steps(diagnose.diagnose())
+        assert steps["Proxy"].status == "ok" and proxy_url in steps["Proxy"].detail
+        assert "not used" in steps["Proxy"].detail and steps["Account"].status == "ok"
+
+        _save(server, proxy="system")
+        steps = _steps(diagnose.diagnose())
+        assert steps["Proxy"].status == "warn" and "HTTP_PROXY" in steps["Proxy"].detail
+        assert steps["Connect"].detail.startswith("TCP to the proxy")
+        assert steps["Backend"].status == "fail" and "전사 차단" in steps["Backend"].detail
+        assert "Advanced › Proxy" in steps["Backend"].hint and "NO_PROXY" in steps["Backend"].hint
+
+        monkeypatch.setenv("no_proxy", "127.0.0.1")
+        steps = _steps(diagnose.diagnose())
+        assert steps["Proxy"].status == "ok" and "NO_PROXY" in steps["Proxy"].detail
+        assert steps["Account"].status == "ok"
+
+        _save(server, proxy=proxy_url)                 # an explicit proxy, still skipped for NO_PROXY
+        assert "skipped" in _steps(diagnose.diagnose())["Proxy"].detail
+        monkeypatch.delenv("no_proxy")
+        steps = _steps(diagnose.diagnose())
+        assert "the connection's Proxy" in steps["Proxy"].detail and steps["Backend"].status == "fail"
+        assert "NO_PROXY" not in steps["Backend"].hint
     finally:
         proxy.shutdown()
-    assert steps["Proxy"].status == "warn" and "HTTP_PROXY" in steps["Proxy"].detail
-    assert steps["Connect"].detail.startswith("TCP to the proxy")
-    assert steps["Backend"].status == "fail" and "전사 차단" in steps["Backend"].detail
-    assert "NO_PROXY" in steps["Backend"].hint
 
-    monkeypatch.setenv("no_proxy", "127.0.0.1")
-    steps = _steps(diagnose.diagnose())
-    assert steps["Proxy"].status == "ok" and "NO_PROXY" in steps["Proxy"].detail
-    assert steps["Account"].status == "ok"
+    _save(server, proxy="hpc-proxy:3128")
+    step = _steps(diagnose.diagnose())["Proxy"]
+    assert step.status == "fail" and "http://host:port" in step.detail
 
 
 def test_nothing_listening_and_a_name_that_does_not_resolve():

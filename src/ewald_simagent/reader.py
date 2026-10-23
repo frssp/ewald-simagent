@@ -89,6 +89,21 @@ def fetch(client: Client, target: Target, conn) -> str:
     return str(dest)
 
 
+def local_file(path: str, connection: str | None = None) -> str:
+    """A local copy of one retrieved file, ``simagent:1234/scf/locpot_planar_avg.json``, for code
+    that reads a file itself (a JSON, not frames). Files left on the cluster are refused: open
+    those with ``load()``, which reads them over SSH."""
+    uri = parse(path)
+    conn = get_connection(connection or uri.connection)
+    client = Client(conn)
+    targets = resolve(client.node(uri.node), uri.parts)
+    if len(targets) != 1 or targets[0].kind != "file":
+        raise SimAgentError(f"{path} is not one file; name it, e.g. simagent:1234/scf/OUTCAR")
+    if targets[0].where != "retrieved":
+        raise SimAgentError(f"{targets[0].name} was not retrieved by AiiDA; load() reads it from the cluster")
+    return fetch(client, targets[0], conn)
+
+
 class SimAgentReader(FrameReader):
     """A finished sim-agent calculation by AiiDA PK or UUID (read-only):
     ``simagent:[connection/]NODE[/step...][/file]``.
