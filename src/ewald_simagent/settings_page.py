@@ -51,7 +51,7 @@ class SimAgentSettings:
         SettingsField("name", "Connection name", default="default",
                       help="Keep several servers under different names; simagent:NAME/1234 picks one"),
     )
-    actions: ClassVar[dict] = {"Test": "test", "Log out": "logout"}
+    actions: ClassVar[dict] = {"Diagnose": "diagnose", "Log out": "logout"}
 
     def _current(self, name: str | None = None) -> client.Connection | None:
         try:
@@ -96,15 +96,18 @@ class SimAgentSettings:
             raise ValueError(str(exc)) from None
         return f"Connected to {url} as {who['user']}; the access key is in the keychain"
 
-    def test(self, values: dict) -> str:
+    def diagnose(self, values: dict) -> str:
+        """Every step of the saved connection, from the address to the account
+        (:mod:`ewald_simagent.diagnose`), as a table with a mark per step and the fix under a
+        failed one."""
+        from . import diagnose
+
         conn = self._current(values.get("name", "").strip() or None)
         if conn is None:
             return "Not logged in yet: fill in the fields and Save"
-        try:
-            who = client.Client(conn).whoami()
-        except client.SimAgentError as exc:
-            raise ValueError(str(exc)) from None
-        return f"{conn.url}: logged in as {who['user']} (sim-agent {who.get('version', '?')})"
+        return diagnose.report_html(diagnose.diagnose(conn))
+
+    test = diagnose      # the button was called Test before 0.1.1
 
     def logout(self, values: dict) -> str:
         name = values.get("name", "").strip() or "default"

@@ -1,4 +1,4 @@
-"""``python -m ewald_simagent login URL --user USER`` / ``show 1234`` / ``connections`` / ``logout``."""
+"""``python -m ewald_simagent login URL --user USER`` / ``show 1234`` / ``connections`` / ``doctor`` / ``logout``."""
 from __future__ import annotations
 
 import argparse
@@ -27,6 +27,10 @@ def main(argv=None):
     show.add_argument("node", help="PK, UUID or simagent:... path")
     show.add_argument("--connection")
     sub.add_parser("connections", help="saved connections")
+    doctor = sub.add_parser("doctor", help="check a connection step by step: address, proxy, DNS, TCP, TLS, "
+                                           "backend, access key, account")
+    doctor.add_argument("--connection")
+    doctor.add_argument("--timeout", type=float, default=10, help="seconds per step (default 10)")
     logout = sub.add_parser("logout", help="forget a connection and its token (revoke it in sim-agent too)")
     logout.add_argument("name")
     args = parser.parse_args(argv)
@@ -52,6 +56,13 @@ def main(argv=None):
             from . import describe
 
             print(describe(args.node, args.connection))
+        elif args.command == "doctor":
+            from . import diagnose
+
+            checks = diagnose.diagnose(args.connection, timeout=args.timeout)
+            print(diagnose.report(checks))
+            if not diagnose.ok(checks):
+                sys.exit(1)
         elif args.command == "connections":
             for name, c in client.connections().items():
                 print(f"{name}: {c.url} as {c.user}" + (f"  hosts {c.hosts}" if c.hosts else ""))

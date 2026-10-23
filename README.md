@@ -9,6 +9,7 @@ python -m ewald_simagent login http://SERVER/alice/ --user alice     # asks your
 python -m ewald_simagent login http://SERVER/alice/ --user alice --key   # or paste a key from the web UI (API keys)
 python -m ewald_simagent login http://SERVER/alice/ --user alice --host supercom=hpc   # SSH alias for a Computer
 python -m ewald_simagent show 1234                                   # steps, files, and the path that opens each
+python -m ewald_simagent doctor                                      # when it does not connect: which step fails, and the fix
 ```
 
 ```python
@@ -40,8 +41,8 @@ WorkGraph) opens it as one notebook: one cell that loads every step (`relax = lo
 
 1. Plugins side bar › sim-agent results › **Settings** (or Edit › Plugin settings › sim-agent):
    the server address, your login, and either an access key from the web UI (user menu › API
-   keys) or your web password, which is used once to make a key and not kept. **Test** checks
-   the login, **Log out** forgets it.
+   keys) or your web password, which is used once to make a key and not kept. **Diagnose**
+   checks the connection step by step (below), **Log out** forgets it.
 2. File › **Open location…** (Ctrl+L) and type `simagent:1234`, or any path above.
 3. Or ask in Ask AI ("open the bands of 1234"): EWALD's `list_workflows` and
    `describe_workflow` tools list your calculations and a node's steps, files and structures
@@ -50,6 +51,24 @@ WorkGraph) opens it as one notebook: one cell that loads every step (`relax = lo
 The side bar and the AI tools need an EWALD with workflow sources (`ewald.workflow`), the
 settings page and Open location one with plugin settings pages; with an older one
 use `python -m ewald_simagent login` and `load()` in a cell.
+
+## When it does not connect
+
+**Diagnose** in the settings (or `python -m ewald_simagent doctor`) checks the saved connection
+step by step and stops at the first step that fails, with what to do about it:
+
+| Step | Checks | A failure usually means |
+|---|---|---|
+| Address | http or https | plain http (sim-agent's IP mode) is a warning: the key is unencrypted |
+| Proxy | whether this PC sends the request through a proxy (`HTTP(S)_PROXY`, OS settings, `NO_PROXY`) | an office proxy blocks the site server: add the server to `NO_PROXY` |
+| DNS | the server name resolves | wrong name, or not on the site network/VPN |
+| Connect | a TCP connection to the server (or the proxy), with its time | firewall, VPN, or nginx down |
+| TLS | the https certificate | a self-signed certificate: give its CA file |
+| Backend | one request without credentials reaches sim-agent's API, with its time | 504/502 or no answer: the user's backend process is stuck, restart it (`sudo systemctl restart sim-agent-backend@USER.service`); an HTML page: a proxy block page or the wrong address |
+| Access key | `whoami` with the key in this PC's keychain | no key on this PC, or it expired or was revoked: make a new one |
+| Account | the key belongs to the login | a key made by another user |
+
+It sends only those two requests, by the same route as every other request of the plugin.
 
 ## How it works
 
