@@ -249,7 +249,7 @@ def test_listing_follows_the_cursor(connected):
         cursor = page["next_cursor"]
         if cursor is None:
             break
-    assert seen == [400, 300, 100, 500]
+    assert seen == [400, 300, 100, 500, 600]
     assert [n["pk"] for n in api.nodes(q="mlff")["nodes"]] == [400]
 
 

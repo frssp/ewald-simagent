@@ -73,9 +73,10 @@ def _band_offset(wf) -> list[Analysis]:
         """)
     geometry = _cell("""
         # which atoms are substrate and film (plane composition against the two bulk references),
-        # and each side's repeat distance along the normal (the macroscopic-average windows)
+        # and each side's repeat distance along the normal, read from its layer in the interface
+        # (the macroscopic-average windows; the bulk references are primitive cells in any orientation)
         sides = pot.split_sides(frames['interface'], frames['substrate'], frames['film'])
-        periods = {side: pot.normal_period(frames[side]) for side in ('substrate', 'film')}
+        periods = {side: pot.layer_period(frames['interface'], sides[side]) for side in ('substrate', 'film')}
         z = np.mod(frames['interface'].cell.to_fractional(frames['interface'].positions)[:, 2], 1.0)
         lineup = pot.potential_lineup(planar['interface'], z[sides['substrate']], z[sides['film']],
                                       periods['substrate'], periods['film'])
@@ -96,8 +97,57 @@ def _band_offset(wf) -> list[Analysis]:
     return [Analysis("lineup", title, [fetch, geometry, align], result="band_offset")]
 
 
+def _slab_statics(wf) -> dict:
+    """``{surface: step}`` of the slab statics, named ``slab_<hkl>_<term>_static``
+    (frssp/sim_agent workgraphs/templates/vasp_workfunction.py and
+    vasp_polycrystalline_workfunction.py; their finalize walks the same names)."""
+    return {name[len("slab_"):-len("_static")]: step for name, step in _steps(wf).items()
+            if name.startswith("slab_") and name.endswith("_static")}
+
+
+def _work_function(wf) -> list[Analysis]:
+    title = "Work function per surface"
+    statics = _slab_statics(wf)
+    if not statics:
+        return [Analysis("work_function", title, reason="no slab_*_static steps in this workflow")]
+    usable = {s: st for s, st in statics.items()
+              if st.state == "finished" and not st.failed and st.path
+              and {PLANAR_JSON, "vasprun.xml"} <= {o.name for o in st.outputs}}
+    skipped = sorted(set(statics) - set(usable))
+    if not usable:
+        return [Analysis("work_function", title, reason=f"no slab static finished with {PLANAR_JSON} and "
+                         f"vasprun.xml (was it run with LVHAR?): {', '.join(skipped)}")]
+    paths = {s: st.path for s, st in usable.items()}
+    fetch = _cell(f"""
+        import numpy as np
+        from ewald import potential as pot
+        from ewald.verbs import Table
+        from ewald_simagent import local_file
+
+        slabs = {paths!r}
+        skipped = {skipped!r}   # slab statics that did not finish with a planar average
+        runs = {{s: load(path) for s, path in slabs.items()}}
+        frames = {{s: run.compute(run.num_frames - 1) for s, run in runs.items()}}
+        planar = {{s: pot.read_planar_json(local_file(slabs[s] + '/{PLANAR_JSON}'), frames[s]) for s in slabs}}
+        """)
+    compute = _cell("""
+        # Phi = V_vac - E_F, V_vac the maximum of the planar average (the vacuum plateau), as sim-agent
+        work_functions = {s: pot.work_function(planar[s], frames[s].attributes.get('Fermi Energy')) for s in slabs}
+        profiles = {s: pot.work_function_table(planar[s], work_functions[s], s) for s in slabs}
+        work_function = Table('Work functions', {
+            'Surface #': np.arange(len(slabs)),
+            'Work function (eV)': [work_functions[s]['work_function_eV'] for s in slabs],
+            'Vacuum level (eV)': [work_functions[s]['vacuum_level_eV'] for s in slabs],
+            'E_F (eV)': [work_functions[s]['fermi_eV'] for s in slabs]},
+            labels=list(slabs), attributes={'result': work_functions, 'skipped': skipped})
+        {s: round(w['work_function_eV'], 3) for s, w in work_functions.items()}
+        """)
+    return [Analysis("work_function", title, [fetch, compute], result="work_function")]
+
+
 #: template -> recipe
-RECIPES = {"vasp_band_offset": _band_offset}
+RECIPES = {"vasp_band_offset": _band_offset, "vasp_workfunction": _work_function,
+           "vasp_polycrystalline_workfunction": _work_function}
 
 
 def analyses(wf) -> list[Analysis]:
