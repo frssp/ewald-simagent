@@ -9,6 +9,9 @@ kills or changes calculations; that stays in sim-agent with its guards.
   `POST /api/v1/tokens`, `/api/v1/nodes/{node}`, `.../files/{name}`, `.../structure.extxyz`),
   owned by frssp/sim_agent `docs/api/results-api-v1.md`. Change it there first; keep
   `tests/conftest.py`'s fake backend matching it, and bump `client.SCHEMA` only together with sim-agent.
+  `tests/contract/sim-agent-v1.json` is sim-agent's real answers, captured by `tests/contract/capture.py`
+  run with a sim-agent checkout's Python (never edited by hand); `tests/test_contract.py` holds the fake
+  backend and the plugin to it, and with `SIM_AGENT_PYTHON=<that python>` re-captures and fails on a change.
 - Read files with EWALD's own readers (`ewald.io.FileSource`), never parse VASP here.
   Files not retrieved by AiiDA come from the cluster work directory through EWALD's SSH remote.
 - Tokens only through `ewald.keychain` (never in `simagent.json`, settings.json or `os.environ`); the web
