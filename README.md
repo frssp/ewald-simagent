@@ -124,7 +124,8 @@ cells you can read and change (`src/ewald_simagent/analyses.py`, one recipe per 
 `vasp_band_offset` it is the potential lineup: the cells load `interface_static`,
 `ref_substrate_static` and `ref_film_static`, read their retrieved `locpot_planar_avg.json` (no
 LOCPOT needed) and `vasprun.xml`, tell substrate from film atoms by plane composition against
-the two bulk references, take each side's macroscopic-average window from its bulk cell, and
+the two bulk references, read each side's macroscopic-average window (its primitive d_hkl) from
+its layer in the interface, and
 move each bulk's VBM and CBM by its plateau shift (V̄ interface plateau minus V̄ bulk); E_F is
 the interface's. The last cell leaves `band_offset`, a table of the planar and macroscopic
 average with the levels and the band offset or Schottky barriers in its attributes. The numbers
@@ -133,6 +134,12 @@ API does not serve; a workflow without one of the three statics or their files g
 instead. In the AI side bar, "draw the potential with VBM, CBM and E_F" runs these cells
 (`add_analysis`). Needs an EWALD with `ewald.potential`; an older one opens the workflow without
 the analysis.
+
+`vasp_workfunction` and `vasp_polycrystalline_workfunction` end with the work function of every
+slab static (`slab_<hkl>_<term>_static`): Phi = V_vac - E_F from its retrieved
+`locpot_planar_avg.json` and vasprun.xml, V_vac the maximum of the planar average, as sim-agent
+computes it; `work_function` is the table of all surfaces and `profiles` one plot table per
+surface on the vacuum level. A slab static without the planar average is named in `skipped`.
 
 ## The contract with sim-agent
 

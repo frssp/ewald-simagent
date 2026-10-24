@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from .band_offset_data import files as band_offset_files
+from .workfunction_data import files as workfunction_files
 
 DATA = Path(__file__).parent / "data"
 USER, PASSWORD, TOKEN = "alice", "s3cret", "sa_pat_test"
@@ -56,16 +57,27 @@ NODES = {
               _calc(503, ["ref_substrate_static", "iteration_01"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
               _calc(504, ["ref_film_static", "iteration_01"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
           ]},
+    600: {"kind": "process", "process_label": "WorkGraph<vasp_workfunction>", "template": "vasp_workfunction",
+          "process_state": "finished", "exit_status": 0, "scalars": {}, "structures": [],
+          "calculations": [
+              _calc(601, ["bulk_relax", "iteration_01"], ["OUTCAR", "vasprun.xml"]),
+              _calc(602, ["slab_111_t1_static", "iteration_01"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
+              _calc(603, ["slab_100_t1_static", "iteration_01"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
+              _calc(604, ["slab_110_t1_static", "iteration_01"], ["OUTCAR", "vasprun.xml"]),
+          ]},
 }
 #: ``(calculation pk, file name) -> bytes`` served instead of tests/data/vasprun.xml
 FILES = {(pk, name): data for pk, step in ((502, "interface_static"), (503, "ref_substrate_static"),
                                            (504, "ref_film_static"))
          for name, data in band_offset_files()[step].items()}
+FILES.update({(pk, name): data for pk, step in ((602, "slab_111_t1_static"), (603, "slab_100_t1_static"))
+              for name, data in workfunction_files()[step].items()})
 for pk, node in NODES.items():
     node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
                  "node_type": "", "label": "", "ctime": f"2026-10-{10 + pk // 100:02d}T00:00:00+00:00"})
 NODES[100]["formula"] = "Si2"
 NODES[500]["ctime"] = "2026-10-01T00:00:00+00:00"   # the oldest: the listing tests above it stay as they were
+NODES[600]["ctime"] = "2026-09-30T00:00:00+00:00"
 
 EXTXYZ = ('2\nLattice="5.43 0 0 0 5.43 0 0 0 5.43" Properties=species:S:1:pos:R:3 pbc="T T T"\n'
           "Si 0 0 0\nSi 1.3575 1.3575 1.3575\n")
