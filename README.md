@@ -30,7 +30,9 @@ in saved notebooks, which store only the string.
 ## In the GUI, without Python
 
 The **sim-agent** button on the activity bar (the icon column at the left) opens a side bar
-with your recent calculations, newest first. Type a PK or UUID to jump to one, or words to
+with your recent calculations, newest first, each with the name of the sim-agent chat that
+submitted it dimmed under its title (needs a sim-agent whose API sends `chat`, and an EWALD
+with `Workflow.group`). Type a PK or UUID to jump to one, or words (a chat name too) to
 search. Expanding a calculation lists its steps (restarts together), their files (CHGCAR and
 LOCPOT read from the cluster) and output structures; a double click opens one, and the buttons
 insert a `load(...)` cell or copy the path. A double click on the calculation itself (a

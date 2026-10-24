@@ -21,6 +21,18 @@ def test_listing_rows(connected):
     assert [w.title for w in src.list(query="bands").workflows] == ["vasp_bands  Si2  <100>  ✓"]
 
 
+def test_listing_rows_carry_the_chat_name(connected):
+    from ewald_simagent.source import SimAgentWorkflows
+
+    src = SimAgentWorkflows()
+    groups = {w.id: w.group for w in src.list().workflows}
+    assert groups["100"] == "Si band structure"
+    assert groups["400"] == "chat 7b1d0e44"       # the chat was deleted: its id stays
+    assert groups["300"] == ""                    # no chat (an older server, or not from a chat)
+    assert [w.id for w in src.list(query="band struct").workflows] == ["100"]
+    assert src.describe("100").group == "Si band structure"
+
+
 def test_describe_joins_restarts_and_nests_call_paths(connected):
     from ewald_simagent.source import SimAgentWorkflows
 

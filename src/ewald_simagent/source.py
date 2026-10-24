@@ -69,11 +69,27 @@ def _name(n: dict) -> str:
 
 
 def row(n: dict, conn) -> Workflow:
-    """A listing row (``GET /api/v1/nodes``) as a Workflow not described yet."""
-    return Workflow(_name(n), id=str(n["pk"]), path=stable(conn.name, n["uuid"]), kind=_name(n),
-                    formula=n.get("formula") or "", state=n.get("process_state") or "",
-                    exit_status=n.get("exit_status"), label=n.get("label") or "",
-                    description=n.get("description") or "", ctime=n.get("ctime") or "")
+    """A listing row (``GET /api/v1/nodes``) as a Workflow not described yet. Its group is the
+    name of the sim-agent chat that submitted it (``chat``, from a server that sends one)."""
+    wf = Workflow(_name(n), id=str(n["pk"]), path=stable(conn.name, n["uuid"]), kind=_name(n),
+                  formula=n.get("formula") or "", state=n.get("process_state") or "",
+                  exit_status=n.get("exit_status"), label=n.get("label") or "",
+                  description=n.get("description") or "", ctime=n.get("ctime") or "")
+    # set, not passed: an EWALD without Workflow.group then just ignores it
+    wf.group = chat_name(n)
+    return wf
+
+
+def chat_name(n: dict) -> str:
+    """The name of the chat that submitted node ``n``: its title, else "chat <id>" for a chat
+    that was deleted; "" when the server sends no ``chat``."""
+    chat = n.get("chat") or {}
+    if not isinstance(chat, dict):
+        return ""
+    name = str(chat.get("name") or "").strip()
+    if name:
+        return name
+    return f"chat {str(chat['id'])[:8]}" if chat.get("id") else ""
 
 
 def _scalars(desc: dict) -> dict:
