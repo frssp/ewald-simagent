@@ -76,6 +76,8 @@ for pk, node in NODES.items():
     node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
                  "node_type": "", "label": "", "ctime": f"2026-10-{10 + pk // 100:02d}T00:00:00+00:00"})
 NODES[100]["formula"] = "Si2"
+NODES[100]["chat"] = {"id": "3f2a9c1e-0000-4000-8000-000000000000", "name": "Si band structure"}
+NODES[400]["chat"] = {"id": "7b1d0e44-0000-4000-8000-000000000000", "name": None}   # chat deleted
 NODES[500]["ctime"] = "2026-10-01T00:00:00+00:00"   # the oldest: the listing tests above it stay as they were
 NODES[600]["ctime"] = "2026-09-30T00:00:00+00:00"
 
@@ -168,11 +170,12 @@ def _list(self, query):
     if "q" in query:
         q = query["q"][0].lower()
         fields = ("label", "description", "template", "formula", "process_label")
-        rows = [n for n in rows if q in " ".join(str(n.get(k) or "") for k in fields).lower()]
+        rows = [n for n in rows if q in " ".join([str(n.get(k) or "") for k in fields]
+                                                 + [str((n.get("chat") or {}).get("name") or "")]).lower()]
     limit = int(query.get("limit", ["50"])[0])
     page = rows[:limit]
     keys = ("pk", "uuid", "label", "description", "ctime", "template", "formula", "process_label",
-            "process_state", "exit_status", "exit_message")
+            "process_state", "exit_status", "exit_message", "chat")
     self._send(200, json.dumps({"schema": "sim-agent.node/1", "nodes": [{k: n.get(k) for k in keys} for n in page],
                                 "next_cursor": str(start + limit) if len(rows) > limit else None}).encode())
 
