@@ -74,8 +74,13 @@ FILES.update({(pk, name): data for pk, step in ((602, "slab_111_t1_static"), (60
               for name, data in workfunction_files()[step].items()})
 for pk, node in NODES.items():
     node.update({"schema": "sim-agent.node/1", "pk": pk, "uuid": f"{pk:08x}-1111-4000-8000-000000000000",
-                 "node_type": "", "label": "", "ctime": f"2026-10-{10 + pk // 100:02d}T00:00:00+00:00"})
-NODES[100]["formula"] = "Si2"
+                 "node_type": "", "label": "", "ctime": f"2026-10-{10 + pk // 100:02d}T00:00:00+00:00",
+                 "chat": None})
+    if node["kind"] == "process":
+        node.setdefault("exit_message", None)
+        node.setdefault("template", None)
+#: the input structure's formula and the description: listing rows only, not a node's description
+ROWS = {100: {"formula": "Si2", "description": "band structure of Si"}}
 NODES[100]["chat"] = {"id": "3f2a9c1e-0000-4000-8000-000000000000", "name": "Si band structure"}
 NODES[400]["chat"] = {"id": "7b1d0e44-0000-4000-8000-000000000000", "name": None}   # chat deleted
 NODES[500]["ctime"] = "2026-10-01T00:00:00+00:00"   # the oldest: the listing tests above it stay as they were
@@ -99,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         if code == 401:
-            self.send_header("WWW-Authenticate", 'Basic realm="sim-agent"')
+            self.send_header("WWW-Authenticate", 'Bearer realm="sim-agent"')
         self.end_headers()
         self.wfile.write(body)
 
@@ -122,25 +127,26 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         if not self.path.endswith("/api/v1/tokens"):
-            return self._send(404, b'{"status": "error", "message": "no such route"}')
+            return self._send(404, b'{"status": "error", "code": "not_found", "message": "no such route"}')
         if self.headers.get("Authorization") != BASIC:
-            return self._send(401, b'{"status": "error", "message": "wrong password"}')
-        self._send(201, json.dumps({"status": "success", "token": TOKEN, "id": "1a2b3c4d",
-                                    "name": body.get("name")}).encode())
+            return self._send(401, b'{"status": "error", "code": "unauthorized", "message": "wrong password"}')
+        self._send(201, json.dumps({"id": "1a2b3c4d", "name": body.get("name"),
+                                    "created": "2026-10-24T00:00:00+00:00",
+                                    "expires": "2027-04-22T00:00:00+00:00", "token": TOKEN}).encode())
 
     def do_GET(self):
         Handler.requests.append(self.path)
         if self._odd():
             return
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":  # Basic only mints tokens
-            return self._send(401, b'{"status": "error", "message": "sim-agent login required"}')
+            return self._send(401, b'{"status": "error", "code": "unauthorized", "message": "sim-agent login required"}')
         route = self.path.split("/api/v1/", 1)[1]
         if route.split("?")[0] == "nodes":
             return self._list(parse_qs(urlsplit(route).query))
         parts = route.split("/")
         if parts == ["whoami"]:
             return self._send(200, json.dumps({"user": USER, "schema": "sim-agent.node/1",
-                                               "version": "test"}).encode())
+                                               "version": "test", "token_id": "1a2b3c4d"}).encode())
         node = NODES.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
         if node is None and len(parts) > 1:      # a UUID prefix (8 characters at least)
             found = [n for n in NODES.values() if n["uuid"].startswith(parts[1])]
@@ -155,12 +161,14 @@ class Handler(BaseHTTPRequestHandler):
             name = "/".join(parts[3:])
             body = FILES.get((int(parts[1]), name)) or (DATA / "vasprun.xml").read_bytes()
             return self._send(200, body, "application/octet-stream")
-        self._send(404, json.dumps({"status": "error", "message": "No node among your calculations."}).encode())
+        self._send(404, json.dumps({"status": "error", "code": "not_found",
+                                     "message": "No node among your calculations."}).encode())
 
 
 def _list(self, query):
     """``GET /nodes``: top-level processes, newest first, ``limit``/``cursor``/``q``."""
-    rows = [n for n in NODES.values() if n["kind"] == "process"]
+    rows = [{"formula": None, "description": "", **n, **ROWS.get(n["pk"], {})}
+            for n in NODES.values() if n["kind"] == "process"]
     rows.sort(key=lambda n: (n["ctime"], n["pk"]), reverse=True)
     if "cursor" in query:     # opaque to the client; here the index of the next row
         rows = rows[int(query["cursor"][0]):]

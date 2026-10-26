@@ -1,0 +1,759 @@
+{
+ "schema": "sim-agent.node/1",
+ "captured_from": "frssp/sim_agent 5953e069305b9b9983ed13acb68611236298fa33",
+ "exchanges": [
+  {
+   "name": "token, wrong password",
+   "method": "POST",
+   "path": "tokens",
+   "status": 401,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "unauthorized",
+    "message": "Minting a key needs HTTP Basic with your sim-agent web login."
+   }
+  },
+  {
+   "name": "token",
+   "method": "POST",
+   "path": "tokens",
+   "status": 201,
+   "content_type": "application/json",
+   "json": {
+    "id": "1a2b3c4d",
+    "name": "ewald on pc",
+    "created": "2026-10-24T00:00:00+00:00",
+    "expires": "2026-10-24T00:00:00+00:00",
+    "token": "sa_pat_TOKEN"
+   }
+  },
+  {
+   "name": "whoami, no key",
+   "method": "GET",
+   "path": "whoami",
+   "status": 401,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "unauthorized",
+    "message": "Send 'Authorization: Bearer <key>'. Create a key in the sim-agent web UI (user menu > API keys) or with POST /api/v1/tokens and your web login."
+   }
+  },
+  {
+   "name": "whoami, revoked key",
+   "method": "GET",
+   "path": "whoami",
+   "status": 401,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "unauthorized",
+    "message": "Send 'Authorization: Bearer <key>'. Create a key in the sim-agent web UI (user menu > API keys) or with POST /api/v1/tokens and your web login."
+   }
+  },
+  {
+   "name": "whoami",
+   "method": "GET",
+   "path": "whoami",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "user": "alice",
+    "schema": "sim-agent.node/1",
+    "version": "VERSION",
+    "token_id": "1a2b3c4d"
+   }
+  },
+  {
+   "name": "list",
+   "method": "GET",
+   "path": "nodes?limit=50",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "nodes": [
+     {
+      "pk": 1024,
+      "uuid": "cafe0001-0000-4000-8000-000000000000",
+      "label": "",
+      "description": "",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": null,
+      "formula": null,
+      "process_label": "WorkGraph<vasp_convergence>",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "chat": null
+     },
+     {
+      "pk": 1008,
+      "uuid": "cafe0002-0000-4000-8000-000000000000",
+      "label": "",
+      "description": "",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": null,
+      "formula": "Si2",
+      "process_label": "VaspCalculation",
+      "process_state": "running",
+      "exit_status": null,
+      "exit_message": null,
+      "chat": null
+     },
+     {
+      "pk": 1007,
+      "uuid": "cafe0003-0000-4000-8000-000000000000",
+      "label": "",
+      "description": "",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": "vasp_workfunction",
+      "formula": "Fe",
+      "process_label": "WorkGraph<vasp_workfunction>",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "chat": {
+       "id": "t-gone",
+       "name": null
+      }
+     },
+     {
+      "pk": 1001,
+      "uuid": "cafe0004-0000-4000-8000-000000000000",
+      "label": "Si bands",
+      "description": "band structure of Si",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": "vasp_bands",
+      "formula": "Si2",
+      "process_label": "WorkGraph<vasp_bands>",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "chat": {
+       "id": "t-bands",
+       "name": "Si band structure"
+      }
+     }
+    ],
+    "next_cursor": null
+   }
+  },
+  {
+   "name": "list, one row",
+   "method": "GET",
+   "path": "nodes?limit=1",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "nodes": [
+     {
+      "pk": 1024,
+      "uuid": "cafe0001-0000-4000-8000-000000000000",
+      "label": "",
+      "description": "",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": null,
+      "formula": null,
+      "process_label": "WorkGraph<vasp_convergence>",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "chat": null
+     }
+    ],
+    "next_cursor": "CURSOR1"
+   }
+  },
+  {
+   "name": "list, next page",
+   "method": "GET",
+   "path": "nodes?limit=1&cursor=CURSOR1",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "nodes": [
+     {
+      "pk": 1008,
+      "uuid": "cafe0002-0000-4000-8000-000000000000",
+      "label": "",
+      "description": "",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": null,
+      "formula": "Si2",
+      "process_label": "VaspCalculation",
+      "process_state": "running",
+      "exit_status": null,
+      "exit_message": null,
+      "chat": null
+     }
+    ],
+    "next_cursor": "CURSOR2"
+   }
+  },
+  {
+   "name": "list, search by chat name",
+   "method": "GET",
+   "path": "nodes?limit=50&q=band",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "nodes": [
+     {
+      "pk": 1001,
+      "uuid": "cafe0004-0000-4000-8000-000000000000",
+      "label": "Si bands",
+      "description": "band structure of Si",
+      "ctime": "2026-10-24T00:00:00+00:00",
+      "template": "vasp_bands",
+      "formula": "Si2",
+      "process_label": "WorkGraph<vasp_bands>",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "chat": {
+       "id": "t-bands",
+       "name": "Si band structure"
+      }
+     }
+    ],
+    "next_cursor": null
+   }
+  },
+  {
+   "name": "list, bad limit",
+   "method": "GET",
+   "path": "nodes?limit=0",
+   "status": 400,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "bad_request",
+    "message": "limit must be 1 to 200."
+   }
+  },
+  {
+   "name": "list, bad cursor",
+   "method": "GET",
+   "path": "nodes?limit=50&cursor=nonsense",
+   "status": 400,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "bad_request",
+    "message": "Unknown cursor 'nonsense'; start again without one."
+   }
+  },
+  {
+   "name": "workgraph",
+   "method": "GET",
+   "path": "nodes/1001",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "pk": 1001,
+    "uuid": "cafe0004-0000-4000-8000-000000000000",
+    "node_type": "process.workflow.WorkflowNode.",
+    "label": "Si bands",
+    "ctime": "2026-10-24T00:00:00+00:00",
+    "kind": "process",
+    "process_label": "WorkGraph<vasp_bands>",
+    "process_state": "finished",
+    "exit_status": 0,
+    "exit_message": null,
+    "template": "vasp_bands",
+    "scalars": {
+     "misc": {
+      "band_gap": 0.61,
+      "total_energy": -10.8
+     }
+    },
+    "structures": [
+     {
+      "link": "relaxed_structure",
+      "pk": 1006,
+      "uuid": "cafe0005-0000-4000-8000-000000000000",
+      "formula": "Si2"
+     }
+    ],
+    "calculations": [
+     {
+      "pk": 1002,
+      "uuid": "cafe0006-0000-4000-8000-000000000000",
+      "path": [
+       "relax",
+       "iteration_01"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc01",
+       "username": "alice"
+      },
+      "structures": []
+     },
+     {
+      "pk": 1003,
+      "uuid": "cafe0007-0000-4000-8000-000000000000",
+      "path": [
+       "relax",
+       "iteration_02"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc02",
+       "username": "alice"
+      },
+      "structures": []
+     },
+     {
+      "pk": 1004,
+      "uuid": "cafe0008-0000-4000-8000-000000000000",
+      "path": [
+       "scf",
+       "iteration_01"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc03",
+       "username": "alice"
+      },
+      "structures": []
+     },
+     {
+      "pk": 1005,
+      "uuid": "cafe0009-0000-4000-8000-000000000000",
+      "path": [
+       "bands",
+       "iteration_01"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "locpot_planar_avg.json",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc04",
+       "username": "alice"
+      },
+      "structures": [
+       {
+        "link": "structure",
+        "pk": 1006,
+        "uuid": "cafe0005-0000-4000-8000-000000000000",
+        "formula": "Si2"
+       }
+      ]
+     }
+    ],
+    "chat": {
+     "id": "t-bands",
+     "name": "Si band structure"
+    }
+   }
+  },
+  {
+   "name": "workgraph by uuid prefix",
+   "method": "GET",
+   "path": "nodes/cafe0004",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "pk": 1001,
+    "uuid": "cafe0004-0000-4000-8000-000000000000",
+    "node_type": "process.workflow.WorkflowNode.",
+    "label": "Si bands",
+    "ctime": "2026-10-24T00:00:00+00:00",
+    "kind": "process",
+    "process_label": "WorkGraph<vasp_bands>",
+    "process_state": "finished",
+    "exit_status": 0,
+    "exit_message": null,
+    "template": "vasp_bands",
+    "scalars": {
+     "misc": {
+      "band_gap": 0.61,
+      "total_energy": -10.8
+     }
+    },
+    "structures": [
+     {
+      "link": "relaxed_structure",
+      "pk": 1006,
+      "uuid": "cafe0005-0000-4000-8000-000000000000",
+      "formula": "Si2"
+     }
+    ],
+    "calculations": [
+     {
+      "pk": 1002,
+      "uuid": "cafe0006-0000-4000-8000-000000000000",
+      "path": [
+       "relax",
+       "iteration_01"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc01",
+       "username": "alice"
+      },
+      "structures": []
+     },
+     {
+      "pk": 1003,
+      "uuid": "cafe0007-0000-4000-8000-000000000000",
+      "path": [
+       "relax",
+       "iteration_02"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc02",
+       "username": "alice"
+      },
+      "structures": []
+     },
+     {
+      "pk": 1004,
+      "uuid": "cafe0008-0000-4000-8000-000000000000",
+      "path": [
+       "scf",
+       "iteration_01"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc03",
+       "username": "alice"
+      },
+      "structures": []
+     },
+     {
+      "pk": 1005,
+      "uuid": "cafe0009-0000-4000-8000-000000000000",
+      "path": [
+       "bands",
+       "iteration_01"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "locpot_planar_avg.json",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc04",
+       "username": "alice"
+      },
+      "structures": [
+       {
+        "link": "structure",
+        "pk": 1006,
+        "uuid": "cafe0005-0000-4000-8000-000000000000",
+        "formula": "Si2"
+       }
+      ]
+     }
+    ],
+    "chat": {
+     "id": "t-bands",
+     "name": "Si band structure"
+    }
+   }
+  },
+  {
+   "name": "workgraph from a deleted chat",
+   "method": "GET",
+   "path": "nodes/1007",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "pk": 1007,
+    "uuid": "cafe0003-0000-4000-8000-000000000000",
+    "node_type": "process.workflow.WorkflowNode.",
+    "label": "",
+    "ctime": "2026-10-24T00:00:00+00:00",
+    "kind": "process",
+    "process_label": "WorkGraph<vasp_workfunction>",
+    "process_state": "finished",
+    "exit_status": 0,
+    "exit_message": null,
+    "template": "vasp_workfunction",
+    "scalars": {},
+    "structures": [],
+    "calculations": [
+     {
+      "pk": 1023,
+      "uuid": "cafe000a-0000-4000-8000-000000000000",
+      "path": [
+       "slab_111_t1_static"
+      ],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "locpot_planar_avg.json",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc05",
+       "username": "alice"
+      },
+      "structures": []
+     }
+    ],
+    "chat": {
+     "id": "t-gone",
+     "name": null
+    }
+   }
+  },
+  {
+   "name": "running calculation",
+   "method": "GET",
+   "path": "nodes/1008",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "pk": 1008,
+    "uuid": "cafe0002-0000-4000-8000-000000000000",
+    "node_type": "process.calculation.calcjob.CalcJobNode.",
+    "label": "",
+    "ctime": "2026-10-24T00:00:00+00:00",
+    "kind": "process",
+    "process_label": "VaspCalculation",
+    "process_state": "running",
+    "exit_status": null,
+    "exit_message": null,
+    "template": null,
+    "scalars": {},
+    "structures": [],
+    "calculations": [
+     {
+      "pk": 1008,
+      "uuid": "cafe0002-0000-4000-8000-000000000000",
+      "path": [],
+      "process_label": "VaspCalculation",
+      "process_state": "running",
+      "exit_status": null,
+      "exit_message": null,
+      "files": [],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc06",
+       "username": "alice"
+      },
+      "structures": []
+     }
+    ],
+    "chat": null
+   }
+  },
+  {
+   "name": "calculation under a workgraph",
+   "method": "GET",
+   "path": "nodes/1003",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "pk": 1003,
+    "uuid": "cafe0007-0000-4000-8000-000000000000",
+    "node_type": "process.calculation.calcjob.CalcJobNode.",
+    "label": "",
+    "ctime": "2026-10-24T00:00:00+00:00",
+    "kind": "process",
+    "process_label": "VaspCalculation",
+    "process_state": "finished",
+    "exit_status": 0,
+    "exit_message": null,
+    "template": null,
+    "scalars": {},
+    "structures": [],
+    "calculations": [
+     {
+      "pk": 1003,
+      "uuid": "cafe0007-0000-4000-8000-000000000000",
+      "path": [],
+      "process_label": "VaspCalculation",
+      "process_state": "finished",
+      "exit_status": 0,
+      "exit_message": null,
+      "files": [
+       "OUTCAR",
+       "vasprun.xml"
+      ],
+      "remote": {
+       "computer": "supercom",
+       "hostname": "hpc.example.org",
+       "path": "/scratch/alice/calc02",
+       "username": "alice"
+      },
+      "structures": []
+     }
+    ],
+    "chat": null
+   }
+  },
+  {
+   "name": "structure",
+   "method": "GET",
+   "path": "nodes/1006",
+   "status": 200,
+   "content_type": "application/json",
+   "json": {
+    "schema": "sim-agent.node/1",
+    "pk": 1006,
+    "uuid": "cafe0005-0000-4000-8000-000000000000",
+    "node_type": "data.core.structure.StructureData.",
+    "label": "",
+    "ctime": "2026-10-24T00:00:00+00:00",
+    "kind": "structure",
+    "formula": "Si2",
+    "natoms": 2,
+    "chat": null
+   }
+  },
+  {
+   "name": "structure as extxyz",
+   "method": "GET",
+   "path": "nodes/1006/structure.extxyz",
+   "status": 200,
+   "content_type": "chemical/x-extxyz",
+   "json": null,
+   "text": "2\nLattice=\"5.47 0.0 0.0 0.0 5.47 0.0 0.0 0.0 5.47\" Properties=species:S:1:pos:R:3:masses:R:1 pbc=\"T T T\"\nSi       0.00000000       0.00000000       0.00000000      28.08550000\nSi       1.36750000       1.36750000       1.36750000      28.08550000\n"
+  },
+  {
+   "name": "retrieved file",
+   "method": "GET",
+   "path": "nodes/1003/files/vasprun.xml",
+   "status": 200,
+   "content_type": "application/octet-stream",
+   "json": null
+  },
+  {
+   "name": "file not retrieved",
+   "method": "GET",
+   "path": "nodes/1003/files/CHGCAR",
+   "status": 404,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "not_found",
+    "message": "No retrieved file 'CHGCAR' on node '1003' among your calculations."
+   }
+  },
+  {
+   "name": "another user's node",
+   "method": "GET",
+   "path": "nodes/1009",
+   "status": 404,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "not_found",
+    "message": "No node '1009' among your calculations."
+   }
+  },
+  {
+   "name": "no such node",
+   "method": "GET",
+   "path": "nodes/999999",
+   "status": 404,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "not_found",
+    "message": "No node '999999' among your calculations."
+   }
+  },
+  {
+   "name": "short uuid prefix",
+   "method": "GET",
+   "path": "nodes/abc",
+   "status": 400,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "bad_request",
+    "message": "'abc' is neither a PK nor a UUID prefix of at least 8 characters."
+   }
+  }
+ ]
+}
