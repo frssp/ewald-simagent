@@ -22,7 +22,7 @@ def _steps(checks):
     return {c.step: c for c in checks}
 
 
-def _serve(status, body, ctype):
+def _serve(status, body, ctype, host="127.0.0.1"):
     """A web server answering every request with one fixed response (nginx with a dead backend,
     or an office proxy's block page)."""
     class Fixed(BaseHTTPRequestHandler):
@@ -36,7 +36,7 @@ def _serve(status, body, ctype):
             self.end_headers()
             self.wfile.write(body)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Fixed)
+    srv = ThreadingHTTPServer((host, 0), Fixed)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
@@ -166,3 +166,31 @@ def test_doctor_command(connected, capsys):
     client.remove_connection("default")
     with pytest.raises(SystemExit):
         main(["doctor"])
+
+
+def test_suggested_address_adds_the_login_only_where_it_is_missing():
+    fix = client.suggested_address
+    assert fix("http://10.0.0.5", "alice") == "http://10.0.0.5/alice/"
+    assert fix("https://sim.example.org:8443/", "alice") == "https://sim.example.org:8443/alice/"
+    assert fix("http://10.0.0.5/alice/", "alice") is None
+    assert fix("https://alice.sim.example.org/", "alice") is None      # subdomain routing
+    assert fix("http://127.0.0.1:8000/", "alice") is None              # a backend run by hand
+
+
+def test_an_address_without_the_login_says_which_address_to_use():
+    """IP mode with only ``http://<ip>`` (2026-10-26): nginx answers every /api/v1 call with its
+    own 404 page, and the login said nothing better than 'Not found'."""
+    try:                        # not 127.0.0.1, which suggested_address leaves alone
+        srv = _serve(404, b"<title>404 Not Found</title>", "text/html", host="127.0.0.2")
+    except OSError:
+        pytest.skip("no 127.0.0.2 loopback here")
+    bare = f"http://127.0.0.2:{srv.server_address[1]}"
+    try:
+        with pytest.raises(client.SimAgentError, match=f"use {bare}/alice/"):
+            client.login(client.Connection("default", bare, USER), key=TOKEN)
+        steps = diagnose.diagnose(_save(bare), timeout=2)
+        address = [c for c in steps if c.step == "Address" and f"{bare}/alice/" in c.hint]
+        assert address and address[0].status == "warn"
+        assert f"{bare}/alice/" in _steps(steps)["Backend"].hint
+    finally:
+        srv.shutdown()
