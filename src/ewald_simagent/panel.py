@@ -6,11 +6,13 @@ from __future__ import annotations
 
 from ewald.plugin_api import workflow_panel
 
-#: a server rack with a pulse, drawn with currentColor so it takes the UI theme's colors
+#: a camera lens like sim-agent's own logo (ring, lens, glint, center), drawn with currentColor
+#: so it takes the UI theme's colors
 ICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
         'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/>'
-        '<path d="M8 7.5h.01M8 16.5h.01M11 7.5h6M11 16.5l1.5-2 1.5 4 1.5-2H17"/></svg>')
+        '<circle cx="12" cy="12" r="9.2"/><circle cx="12" cy="12" r="5.4"/>'
+        '<path d="M9.06 10.30A3.4 3.4 0 0 1 14.60 9.81" stroke-width="1.3"/>'
+        '<circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg>')
 
 
 sim_agent = workflow_panel("simagent", title="sim-agent", icon=ICON,
