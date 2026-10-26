@@ -111,6 +111,27 @@ def plain_http(url: str) -> bool:
     return parts.scheme == "http" and parts.hostname not in ("localhost", "127.0.0.1", "::1")
 
 
+def suggested_address(url: str, user: str) -> str | None:
+    """``url`` with ``/<user>/`` added when it has no path, else None. sim-agent's multi-user
+    server serves each user under ``http://server/<user>/``, so a bare ``http://server`` reaches
+    nginx's landing page and every API call answers 404. Not for this machine (a backend started
+    by hand serves at the root) nor a host name that starts with the login (subdomain routing)."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname or ""
+    if parts.path.strip("/") or not user or host in ("localhost", "127.0.0.1", "::1"):
+        return None
+    if host.split(".")[0] == user:
+        return None
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, f"/{user}/", "", ""))
+
+
+def address_hint(conn: Connection) -> str:
+    """" The address has no /<user>/ ..." when :func:`suggested_address` has a fix, else ""."""
+    fixed = suggested_address(conn.url, conn.user)
+    return (f" The address has no /{conn.user}/ at the end: use {fixed} (the address of your "
+            "sim-agent web UI)") if fixed else ""
+
+
 def proxies(conn: Connection) -> dict | None:
     """The proxies ``conn`` goes through: ``{}`` for none, ``None`` for the system's."""
     proxy = (conn.proxy or "").strip()
@@ -243,7 +264,7 @@ class Client:
             if exc.code == 503:
                 raise SimAgentError(f"sim-agent at {self.conn.url} cannot answer now: {message}") from None
             if exc.code == 404:
-                raise SimAgentError(message or f"Not found on sim-agent: {path}") from None
+                raise SimAgentError(message or f"Not found on sim-agent: {path}.{address_hint(self.conn)}") from None
             if exc.code in (502, 504) and self._via():
                 raise SimAgentError(f"{exc.code} for {path}{self._via()}: the proxy could not reach "
                                     f"{self.conn.url}. Leave Proxy empty in the connection to connect "
@@ -269,7 +290,8 @@ class Client:
             return json.loads(raw.decode())
         except ValueError:
             raise SimAgentError(f"{self.conn.url} answered {path} with {ctype or 'something'} instead of "
-                                "sim-agent's API (a login page or another site?); check the address") from None
+                                "sim-agent's API (a login page or another site?); check the address."
+                                + address_hint(self.conn)) from None
 
     def mint_token(self, name: str, ttl_days: int = 180) -> str:
         """A new API token (needs the client made with ``password``)."""

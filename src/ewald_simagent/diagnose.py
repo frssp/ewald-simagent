@@ -141,6 +141,10 @@ def diagnose(conn: client.Connection | str | None = None, timeout: float = 10) -
             "server has it")
     else:
         add("Address", "ok", f"{parts.scheme}://{host}:{port}")
+    fixed = client.suggested_address(conn.url, conn.user)
+    if fixed:
+        add("Address", "warn", f"{conn.url} has no /{conn.user}/ path",
+            f"sim-agent serves each user under the server's address plus the login: use {fixed}")
 
     try:
         client.proxies(conn)
@@ -274,7 +278,7 @@ def _backend(conn, proxy, timeout, add) -> bool:
             hint = f"That page comes from the proxy (a block page), not sim-agent: {_direct_fix(conn)}"
         else:
             hint = ("Not sim-agent's API: check the address (it ends with your login, as in the browser: "
-                    "http://server/alice/)")
+                    "http://server/alice/)" + client.address_hint(conn))
         add("Backend", "fail", f"{code}, an HTML page{via}: {title!r}", hint, seconds=took)
         return False
     if code == 403 and isinstance(data, dict):
@@ -288,7 +292,7 @@ def _backend(conn, proxy, timeout, add) -> bool:
     if code == 404:
         add("Backend", "fail", f"404: no /api/v1 at {conn.url}",
             "The address must end with your login (http://server/alice/); or sim-agent is older than "
-            "the results API", seconds=took)
+            "the results API." + client.address_hint(conn), seconds=took)
         return False
     add("Backend", "fail", f"unexpected answer {code} ({ctype or 'no content type'}){via}", seconds=took)
     return False
