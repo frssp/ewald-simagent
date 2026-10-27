@@ -155,7 +155,7 @@ slab with a planar average gets its work function, and three potential statics w
 carry vasp_band_offset's roles (`sim_agent_band_offset_role`, `sim_agent_interface`, on the
 structure or on the relaxation it came from) get the lineup. So a new sim-agent template made of
 such steps gets the analysis without a new release of this plugin; a template with a recipe of
-its own still uses that one. A running workflow (AiiDA exports only finished ones), a sim-agent
+its own still uses that one. A single calculation is not asked for one (its files say what it is), and a running workflow (AiiDA exports only finished ones), a sim-agent
 without the archive route or a failing archive leave the steps as they were, and the recipes go
 by the task names as before; `wf.shapes_from` says why ("" when the archive was read).
 

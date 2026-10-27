@@ -32,7 +32,7 @@ def _open_archive(path):
 def archive(wf, connection: str | None = None):
     """The local path of ``wf``'s metadata archive, downloaded once (a sealed workflow's never
     changes) into the workflow's own cache folder; None while it runs or when the server has none."""
-    if wf.state not in SEALED:
+    if wf.state not in SEALED or not wf.steps:   # a single calculation: its files say enough
         return None
     uri = parse(wf.path)
     conn = get_connection(connection or uri.connection)
@@ -72,7 +72,7 @@ def _attach(wf, connection) -> str:
     except SimAgentError as exc:
         return str(exc)
     if path is None:
-        return "no archive (still running, or a server without one)"
+        return "no archive (a single calculation, still running, or a server without one)"
     try:
         theirs = _open_archive(path)
     except ImportError:

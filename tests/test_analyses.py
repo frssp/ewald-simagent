@@ -114,6 +114,13 @@ def test_without_an_archive_the_recipes_go_by_the_names(source, monkeypatch):
     assert wf.shapes_from and wf.analyses[0].available
     assert source.describe("300").shapes_from      # running: not even asked
     assert not any("/300/" in r for r in _archive_requests())
+    from .conftest import NODES
+
+    NODES[300]["process_state"] = "finished"      # a single calculation, finished: its files only
+    try:
+        assert source.describe("300").shapes_from and not any("/300/" in r for r in _archive_requests())
+    finally:
+        NODES[300]["process_state"] = "running"
 
     def missing(path):
         raise ImportError("ewald_aiida")
