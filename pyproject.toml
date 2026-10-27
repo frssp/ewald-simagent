@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ewald-simagent"
-version = "0.2.5"
+version = "0.3.0"
 description = "Open finished sim-agent calculations in EWALD by AiiDA PK: load(\"simagent:1234\")"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
-dependencies = ["ewald>=0.1"]
+dependencies = ["ewald>=0.1", "ewald-aiida @ git+https://github.com/frssp/ewald-plugins@10f59ee64124d7618eb7cab7e02b6296f976e1d4#subdirectory=packages/ewald-aiida"]
 
 [project.optional-dependencies]
 test = ["pytest"]

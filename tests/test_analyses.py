@@ -70,3 +70,56 @@ def test_the_ai_gets_the_work_functions(source):
 
     out = Toolset().call("add_analysis", {"path": "simagent:600", "name": "work_function"}).content
     assert out["result"]["100_t1"]["work_function_eV"] == pytest.approx(PHI["100_t1"], abs=1e-6)
+
+
+def _archive_requests():
+    from .conftest import Handler
+
+    return [r for r in Handler.requests if "archive.aiida" in r]
+
+
+def test_steps_get_their_shape_from_the_metadata_archive_once(source):
+    wf = source.describe("600")
+    steps = {s.name: s for _, s in wf.walk()}
+    assert steps["slab_111_t1_static"].shape == {"kind": "static", "flags": ["slab", "potential"]}
+    assert wf.shapes_from == ""
+    assert _archive_requests() == ["/alice/api/v1/nodes/600/archive.aiida?content=metadata"]
+    source.describe("600")
+    assert len(_archive_requests()) == 1          # a finished workflow's archive is cached
+
+
+def test_a_new_template_gets_the_work_function_by_its_steps_shapes(source):
+    wf = source.describe("700")
+    (a,) = wf.analyses
+    assert a.available and a.name == "work_function"
+    nb = Notebook.from_py(workflow.notebook_text(wf), name="work function")
+    assert nb.run_all(), [c.outputs for c in nb.cells if c.state == "error"]
+    table = nb.namespace["work_function"]
+    assert table.labels == ["surface_a_scf", "surface_b_scf"]
+    assert list(table["Work function (eV)"]) == pytest.approx([PHI["111_t1"], PHI["100_t1"]], abs=1e-6)
+
+
+def test_a_new_template_gets_the_lineup_by_its_structures_roles(source):
+    wf = source.describe("800")
+    (a,) = wf.analyses
+    assert a.available and a.name == "lineup"
+    nb = Notebook.from_py(workflow.notebook_text(wf), name="junction")
+    assert nb.run_all(), [c.outputs for c in nb.cells if c.state == "error"]
+    res = nb.namespace["band_offset"].attributes["result"]
+    assert res["schottky_barrier_p_eV"] == pytest.approx(PHI_BP, abs=0.01)
+
+
+def test_without_an_archive_the_recipes_go_by_the_names(source, monkeypatch):
+    wf = source.describe("500")                   # no archive on this server: names
+    assert wf.shapes_from and wf.analyses[0].available
+    assert source.describe("300").shapes_from      # running: not even asked
+    assert not any("/300/" in r for r in _archive_requests())
+
+    def missing(path):
+        raise ImportError("ewald_aiida")
+
+    monkeypatch.setattr("ewald_simagent.shapes._open_archive", missing)
+    wf = source.describe("700")
+    assert wf.shapes_from == "ewald-aiida is not installed" and wf.analyses == []
+    wf = source.describe("600")
+    assert wf.analyses[0].available             # by the names, as before
