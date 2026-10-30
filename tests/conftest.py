@@ -78,8 +78,60 @@ for pk, node in NODES.items():
 NODES[100]["formula"] = "Si2"
 NODES[100]["chat"] = {"id": "3f2a9c1e-0000-4000-8000-000000000000", "name": "Si band structure"}
 NODES[400]["chat"] = {"id": "7b1d0e44-0000-4000-8000-000000000000", "name": None}   # chat deleted
+# templates sim-agent may add later, with no recipe of their own: steps named otherwise, found by shape
+NODES[700] = {**NODES[600], "pk": 700, "uuid": f"{700:08x}-1111-4000-8000-000000000000",
+              "template": "vasp_surface_scan", "process_label": "WorkGraph<vasp_surface_scan>", "calculations": [
+                  _calc(701, ["bulk_relax"], ["OUTCAR", "vasprun.xml"]),
+                  _calc(702, ["surface_a_scf"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
+                  _calc(703, ["surface_b_scf"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"])]}
+NODES[800] = {**NODES[500], "pk": 800, "uuid": f"{800:08x}-1111-4000-8000-000000000000",
+              "template": "vasp_junction", "process_label": "WorkGraph<vasp_junction>", "calculations": [
+                  _calc(801, ["junction_relax"], ["vasprun.xml"]),
+                  _calc(802, ["metal_relax"], ["vasprun.xml"]),
+                  _calc(803, ["oxide_relax"], ["vasprun.xml"]),
+                  _calc(804, ["junction_scf"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
+                  _calc(805, ["metal_scf"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"]),
+                  _calc(806, ["oxide_scf"], ["OUTCAR", "vasprun.xml", "locpot_planar_avg.json"])]}
+FILES.update({(pk, name): data for pk, step in ((702, "slab_111_t1_static"), (703, "slab_100_t1_static"))
+              for name, data in workfunction_files()[step].items()})
+FILES.update({(pk, name): data for pk, step in ((804, "interface_static"), (805, "ref_substrate_static"),
+                                                (806, "ref_film_static"))
+              for name, data in band_offset_files()[step].items()})
+
+
+def _astep(pk, name, kind="", flags=(), files=(), extras=None, parents=()):
+    """One step of an archive as ewald-aiida describes it (``step.shape``, ``inputs``, ...)."""
+    return {"name": name, "calc_id": str(pk + 90000), "calc_uuid": f"{pk:08x}-0000-4000-8000-000000000000",
+            "shape": {"kind": kind, "flags": list(flags)} if kind else {}, "files": list(files),
+            "inputs": {"structure": {"extras": extras or {}},
+                       "parents": [{"pk": p + 90000, "via": "structure"} for p in parents]}}
+
+
+PLANAR = ("OUTCAR", "vasprun.xml", "locpot_planar_avg.json")
+#: node -> the steps its metadata archive holds (served as JSON; :func:`_fake_archives` opens it).
+#: Archive PKs differ from the server's, as after an import elsewhere: steps match by UUID.
+ARCHIVES = {
+    600: [_astep(601, "bulk_relax", "relax", ["cell_relax"]),
+          _astep(602, "slab_111_t1_static", "static", ["slab", "potential"], PLANAR),
+          _astep(603, "slab_100_t1_static", "static", ["slab", "potential"], PLANAR),
+          _astep(604, "slab_110_t1_static", "static", ["slab"], PLANAR[:2])],
+    700: [_astep(701, "bulk_relax", "relax", ["cell_relax"]),
+          _astep(702, "surface_a_scf", "static", ["slab", "potential"], PLANAR),
+          _astep(703, "surface_b_scf", "static", ["slab", "potential"], PLANAR)],
+    800: [_astep(801, "junction_relax", "relax", extras={"sim_agent_interface": {"n": 1}}),
+          _astep(802, "metal_relax", "relax", extras={"sim_agent_band_offset_role": "substrate",
+                                                      "sim_agent_interface": {"n": 1}}),
+          _astep(803, "oxide_relax", "relax", extras={"sim_agent_band_offset_role": "film",
+                                                      "sim_agent_interface": {"n": 1}}),
+          _astep(804, "junction_scf", "static", ["potential"], PLANAR, parents=[801]),
+          _astep(805, "metal_scf", "static", ["potential"], PLANAR, parents=[802]),
+          _astep(806, "oxide_scf", "static", ["potential"], PLANAR, parents=[803])],
+}
+
 NODES[500]["ctime"] = "2026-10-01T00:00:00+00:00"   # the oldest: the listing tests above it stay as they were
 NODES[600]["ctime"] = "2026-09-30T00:00:00+00:00"
+NODES[700]["ctime"] = "2026-09-29T00:00:00+00:00"
+NODES[800]["ctime"] = "2026-09-28T00:00:00+00:00"
 
 EXTXYZ = ('2\nLattice="5.43 0 0 0 5.43 0 0 0 5.43" Properties=species:S:1:pos:R:3 pbc="T T T"\n'
           "Si 0 0 0\nSi 1.3575 1.3575 1.3575\n")
@@ -148,6 +200,12 @@ class Handler(BaseHTTPRequestHandler):
         calcs = {c["pk"]: c for n in NODES.values() for c in n.get("calculations", [])}
         if len(parts) == 2 and node is not None:
             return self._send(200, json.dumps(node).encode())
+        if len(parts) == 3 and parts[2].split("?")[0] == "archive.aiida" and node is not None:
+            if node.get("process_state") != "finished":
+                return self._send(409, b'{"status": "error", "code": "not_finished", "message": "still running"}')
+            if node["pk"] not in ARCHIVES or "content=metadata" not in parts[2]:
+                return self._send(404, b'{"status": "error", "message": "no archive here"}')
+            return self._send(200, json.dumps(ARCHIVES[node["pk"]]).encode(), "application/zip")
         if len(parts) == 3 and parts[2] == "structure.extxyz" and node and node["kind"] == "structure":
             return self._send(200, EXTXYZ.encode(), "text/plain")
         if (len(parts) >= 4 and parts[2] == "files" and int(parts[1]) in calcs
@@ -191,6 +249,24 @@ def server():
     Handler.requests = []
     yield f"http://127.0.0.1:{srv.server_address[1]}/alice/"
     srv.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def _fake_archives(monkeypatch):
+    """ewald-aiida's ``open_archive`` for the fake server's archives (JSON, not AiiDA's zip:
+    opening real ones is ewald-aiida's to test)."""
+    from ewald.plugin_api import Workflow, WorkflowStep
+
+    def open_archive(path):
+        wf = Workflow("archive")
+        for d in json.loads(Path(path).read_text(encoding="utf-8")):
+            step = WorkflowStep(d.pop("name"))
+            for key, value in d.items():
+                setattr(step, key, value)
+            wf.steps.append(step)
+        return wf
+
+    monkeypatch.setattr("ewald_simagent.shapes._open_archive", open_archive)
 
 
 @pytest.fixture(autouse=True)

@@ -20,7 +20,7 @@ from .uri import SimAgentURI, parse, stable
 
 __all__ = ["Client", "Connection", "SimAgentError", "SimAgentURI", "connections", "describe",
            "get_connection", "local_file", "parse", "resolve", "stable"]
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 
 def describe(node, connection: str | None = None) -> str:
