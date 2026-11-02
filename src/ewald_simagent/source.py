@@ -52,9 +52,12 @@ class SimAgentWorkflows:
         return WorkflowPage([row(n, conn) for n in page.get("nodes", [])], next=page.get("next_cursor"))
 
     def analyses(self, wf: Workflow) -> list:
-        """Notebook analyses for a described workflow, by its template (:mod:`.analyses`)."""
+        """Notebook analyses for a described workflow (:mod:`.analyses`), after its steps got
+        what they were run with from the workflow's archive (:mod:`.shapes`)."""
         from .analyses import analyses
+        from .shapes import attach
 
+        attach(wf, self.connection_name)
         return analyses(wf)
 
     def describe(self, ref: str) -> Workflow:
@@ -132,10 +135,12 @@ def workflow(desc: dict, conn) -> Workflow:
                 found = WorkflowStep(part)
                 parent.steps.append(found)
             parent = found
-        parent.steps.append(WorkflowStep(
+        step = WorkflowStep(
             key[-1], path=path if has_frames else "", state=last.get("process_state") or "",
             exit_status=last.get("exit_status"), runs=len(calcs), id=str(last["pk"]),
-            work_dir=(last.get("remote") or {}).get("path") or "", outputs=outputs))
+            work_dir=(last.get("remote") or {}).get("path") or "", outputs=outputs)
+        step.calc_uuid = last.get("uuid") or ""   # what :mod:`.shapes` matches the archive's steps by
+        parent.steps.append(step)
     wf.outputs += [WorkflowOutput(s["link"], f"{head}/{s['link']}", kind="structure", note=s.get("formula") or "")
                    for s in desc.get("structures", [])]
     return wf

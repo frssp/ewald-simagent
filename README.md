@@ -143,6 +143,22 @@ slab static (`slab_<hkl>_<term>_static`): Phi = V_vac - E_F from its retrieved
 computes it; `work_function` is the table of all surfaces and `profiles` one plot table per
 surface on the vacuum level. A slab static without the planar average is named in `skipped`.
 
+### Steps found by what they computed
+
+Before it offers an analysis the plugin fetches the workflow's AiiDA archive without its file
+contents (`archive.aiida?content=metadata`, kilobytes, once per finished workflow, kept in the
+cache with its files) and opens it with ewald-aiida, which describes every calculation by its
+inputs: the INCAR, k-points and input structure with its extras, as a `step.shape` (`kind`:
+static, relax, bands, dos, md, phonon; `flags`: slab, potential, cell_relax, charged). The
+recipes then find their steps by that rather than by sim-agent's task names: any static of a
+slab with a planar average gets its work function, and three potential statics whose structures
+carry vasp_band_offset's roles (`sim_agent_band_offset_role`, `sim_agent_interface`, on the
+structure or on the relaxation it came from) get the lineup. So a new sim-agent template made of
+such steps gets the analysis without a new release of this plugin; a template with a recipe of
+its own still uses that one. A single calculation is not asked for one (its files say what it is), and a running workflow (AiiDA exports only finished ones), a sim-agent
+without the archive route or a failing archive leave the steps as they were, and the recipes go
+by the task names as before; `wf.shapes_from` says why ("" when the archive was read).
+
 ## The contract with sim-agent
 
 The routes and the payload are sim-agent's results API v1 (`sim-agent.node/1`), defined in
@@ -157,7 +173,8 @@ pip install -e ".[test]"
 pytest
 ```
 
-The tests run a fake sim-agent backend on localhost; no AiiDA or sim-agent install is needed.
+The tests run a fake sim-agent backend on localhost; no AiiDA profile or sim-agent install is
+needed (the fake serves its archives as JSON; opening real ones is ewald-aiida's to test).
 
 ## License
 

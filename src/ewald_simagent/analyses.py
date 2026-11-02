@@ -1,15 +1,20 @@
 """Analyses of sim-agent workflows, as notebook cells (:class:`ewald.workflow.Analysis`).
 
-One recipe per sim-agent template. A recipe names the steps it reads by the template's task
-names, checks that they are there and finished, and writes cells that load those steps' files
-and compute the result with EWALD's own kernels (:mod:`ewald.potential`), in the open: the
-notebook is the record, and nothing is taken from sim-agent's ``finalize_workgraph`` output,
-which the API does not serve. Task names are sim-agent's, quoted with the file and constant
-they come from; a workflow whose steps do not match gets the analysis with a ``reason``
-instead of a guess.
+A recipe finds the steps it reads, checks that they are there and finished, and writes cells
+that load those steps' files and compute the result with EWALD's own kernels
+(:mod:`ewald.potential`), in the open: the notebook is the record, and nothing is taken from
+sim-agent's ``finalize_workgraph`` output, which the API does not serve.
+
+Steps are found by what they computed when the workflow's archive gave them a ``shape``
+(:mod:`.shapes`: a static with a planar average on a slab is a work function's input, whatever
+the task is called; the band-offset roles come from the extras sim-agent puts on the input
+structures), and by sim-agent's task names otherwise, quoted with the file and constant they
+come from. So a new sim-agent template whose statics look like these gets the analysis without
+a change here. A workflow whose steps do not match gets the analysis with a ``reason`` instead
+of a guess.
 
 To add a template: write ``def _my_template(wf) -> list[Analysis]`` and list it in
-:data:`RECIPES`.
+:data:`RECIPES`; to offer it to any workflow whose steps fit, list a test in :data:`DETECTORS`.
 """
 from __future__ import annotations
 
@@ -23,6 +28,8 @@ PLANAR_JSON = "locpot_planar_avg.json"
 #: (INTERFACE_STATIC, REF_TASKS), the names its finalize reads too.
 BAND_OFFSET_STEPS = {"interface": "interface_static", "substrate": "ref_substrate_static",
                      "film": "ref_film_static"}
+#: the extras vasp_band_offset puts on its input structures (same file: ROLE_EXTRA, INTERFACE_EXTRA)
+ROLE_EXTRA, INTERFACE_EXTRA = "sim_agent_band_offset_role", "sim_agent_interface"
 
 
 def _cell(text: str) -> str:
@@ -31,6 +38,37 @@ def _cell(text: str) -> str:
 
 def _steps(wf) -> dict:
     return {s.name: s for _, s in wf.walk()}
+
+
+def _shape(step) -> dict:
+    return getattr(step, "shape", None) or {}
+
+
+def _statics(wf, *flags) -> dict:
+    """``{name: step}`` of the steps the archive says are statics with all of ``flags``."""
+    return {name: st for name, st in _steps(wf).items()
+            if _shape(st).get("kind") == "static" and set(flags) <= set(_shape(st).get("flags") or ())}
+
+
+def _roles_by_extras(wf) -> dict | None:
+    """``{role: step name}`` of the lineup's three statics by the extras of their input
+    structures (each reference's role, the interface's metadata), None unless exactly one
+    potential static has each role."""
+    found: dict = {}
+    for name, st in _statics(wf, "potential").items():
+        extras = getattr(st, "structure_extras", None) or {}
+        role = extras.get(ROLE_EXTRA)
+        role = role if role in ("substrate", "film") else "interface" if INTERFACE_EXTRA in extras else ""
+        if role:
+            found.setdefault(role, []).append(name)
+    if sorted(found) == sorted(BAND_OFFSET_STEPS) and all(len(v) == 1 for v in found.values()):
+        return {role: found[role][0] for role in BAND_OFFSET_STEPS}
+    return None
+
+
+def _band_offset_roles(wf) -> dict:
+    """The lineup's statics by their structures' extras, else by vasp_band_offset's task names."""
+    return _roles_by_extras(wf) or dict(BAND_OFFSET_STEPS)
 
 
 def _missing(wf, wanted: dict, files=()) -> str:
@@ -53,11 +91,12 @@ def _missing(wf, wanted: dict, files=()) -> str:
 
 def _band_offset(wf) -> list[Analysis]:
     title = "Potential lineup: band offset / Schottky barrier"
-    why = _missing(wf, BAND_OFFSET_STEPS, files=(PLANAR_JSON, "vasprun.xml"))
+    roles = _band_offset_roles(wf)
+    why = _missing(wf, roles, files=(PLANAR_JSON, "vasprun.xml"))
     if why:
         return [Analysis("lineup", title, reason=why)]
     steps = _steps(wf)
-    path = {role: steps[name].path for role, name in BAND_OFFSET_STEPS.items()}
+    path = {role: steps[name].path for role, name in roles.items()}
     if not all(path.values()):
         return [Analysis("lineup", title, reason="a static has no vasprun.xml to read")]
     fetch = _cell(f"""
@@ -97,11 +136,22 @@ def _band_offset(wf) -> list[Analysis]:
     return [Analysis("lineup", title, [fetch, geometry, align], result="band_offset")]
 
 
+def _surface(name: str) -> str:
+    """``111_t1`` for ``slab_111_t1_static`` (frssp/sim_agent workgraphs/templates/
+    vasp_workfunction.py and vasp_polycrystalline_workfunction.py; their finalize walks the same
+    names), else the step's own name."""
+    if name.startswith("slab_") and name.endswith("_static") and len(name) > len("slab__static"):
+        return name[len("slab_"):-len("_static")]
+    return name
+
+
 def _slab_statics(wf) -> dict:
-    """``{surface: step}`` of the slab statics, named ``slab_<hkl>_<term>_static``
-    (frssp/sim_agent workgraphs/templates/vasp_workfunction.py and
-    vasp_polycrystalline_workfunction.py; their finalize walks the same names)."""
-    return {name[len("slab_"):-len("_static")]: step for name, step in _steps(wf).items()
+    """``{surface: step}`` of the slab statics: the steps the archive says are statics of a
+    slab, else the ones named ``slab_<hkl>_<term>_static``."""
+    shaped = _statics(wf, "slab")
+    if shaped:
+        return {_surface(name): step for name, step in shaped.items()}
+    return {_surface(name): step for name, step in _steps(wf).items()
             if name.startswith("slab_") and name.endswith("_static")}
 
 
@@ -109,7 +159,7 @@ def _work_function(wf) -> list[Analysis]:
     title = "Work function per surface"
     statics = _slab_statics(wf)
     if not statics:
-        return [Analysis("work_function", title, reason="no slab_*_static steps in this workflow")]
+        return [Analysis("work_function", title, reason="no slab statics (slab_*_static) in this workflow")]
     usable = {s: st for s, st in statics.items()
               if st.state == "finished" and not st.failed and st.path
               and {PLANAR_JSON, "vasprun.xml"} <= {o.name for o in st.outputs}}
@@ -150,7 +200,22 @@ RECIPES = {"vasp_band_offset": _band_offset, "vasp_workfunction": _work_function
            "vasp_polycrystalline_workfunction": _work_function}
 
 
+def _fits_band_offset(wf) -> bool:
+    return _roles_by_extras(wf) is not None
+
+
+def _fits_work_function(wf) -> bool:
+    return any(PLANAR_JSON in (getattr(st, "files", None) or ()) for st in _statics(wf, "slab").values())
+
+
+#: for a template without a recipe: ``(test, recipe)``, offered when its steps' shapes fit
+DETECTORS = ((_fits_band_offset, _band_offset), (_fits_work_function, _work_function))
+
+
 def analyses(wf) -> list[Analysis]:
-    """The analyses for sim-agent workflow ``wf`` (by its template)."""
+    """The analyses for sim-agent workflow ``wf``: its template's recipe, else every recipe
+    whose steps the archive's shapes find in it."""
     recipe = RECIPES.get(wf.kind)
-    return recipe(wf) if recipe else []
+    if recipe:
+        return recipe(wf)
+    return [a for fits, recipe in DETECTORS if fits(wf) for a in recipe(wf)]
