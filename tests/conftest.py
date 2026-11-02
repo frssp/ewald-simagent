@@ -198,7 +198,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = route.split("/")
         if parts == ["whoami"]:
             return self._send(200, json.dumps({"user": USER, "schema": "sim-agent.node/1",
-                                               "version": "test", "token_id": "1a2b3c4d"}).encode())
+                                               "version": "test", "aiida_version": "2.7.5",
+                                               "token_id": "1a2b3c4d"}).encode())
         node = NODES.get(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
         if node is None and len(parts) > 1:      # a UUID prefix (8 characters at least)
             found = [n for n in NODES.values() if n["uuid"].startswith(parts[1])]

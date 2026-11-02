@@ -1,6 +1,6 @@
 {
  "schema": "sim-agent.node/1",
- "captured_from": "frssp/sim_agent 5953e069305b9b9983ed13acb68611236298fa33",
+ "captured_from": "frssp/sim_agent 4547ac0bb9f14ef32fb139a99545d1caf45f70c0",
  "exchanges": [
   {
    "name": "token, wrong password",
@@ -62,6 +62,7 @@
     "user": "alice",
     "schema": "sim-agent.node/1",
     "version": "VERSION",
+    "aiida_version": "AIIDA_VERSION",
     "token_id": "1a2b3c4d"
    }
   },
@@ -698,6 +699,26 @@
    "content_type": "chemical/x-extxyz",
    "json": null,
    "text": "2\nLattice=\"5.47 0.0 0.0 0.0 5.47 0.0 0.0 0.0 5.47\" Properties=species:S:1:pos:R:3:masses:R:1 pbc=\"T T T\"\nSi       0.00000000       0.00000000       0.00000000      28.08550000\nSi       1.36750000       1.36750000       1.36750000      28.08550000\n"
+  },
+  {
+   "name": "workgraph archive, metadata",
+   "method": "GET",
+   "path": "nodes/1001/archive.aiida?content=metadata",
+   "status": 200,
+   "content_type": "application/zip",
+   "json": null
+  },
+  {
+   "name": "running calculation archive",
+   "method": "GET",
+   "path": "nodes/1008/archive.aiida?content=metadata",
+   "status": 409,
+   "content_type": "application/json",
+   "json": {
+    "status": "error",
+    "code": "not_finished",
+    "message": "Node '1008' is still running (AiiDA exports only finished processes); read its description and files meanwhile, and ask again when it has finished."
+   }
   },
   {
    "name": "retrieved file",

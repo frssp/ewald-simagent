@@ -175,6 +175,10 @@ def _history(computer) -> dict:
     bare = _process(orm.WorkflowNode, "WorkGraph<vasp_convergence>").store()
     bare.seal()
 
+    for node in orm.QueryBuilder().append(orm.CalcJobNode).all(flat=True):
+        if node.process_state and node.process_state.value == "finished":
+            node.seal()               # an archive exports finished, sealed processes only
+
     group = get_or_create_user_group(USER)
     group.add_nodes([wg, wf, run, bare])
 
@@ -192,6 +196,14 @@ class _Store:
 
     def get(self, thread_id):
         return self.records.get(thread_id)
+
+
+def _prefix(uuid: str) -> str:
+    """A UUID prefix as the plugin keeps it: 8 characters, longer while all digits (it would read as a PK)."""
+    n = 8
+    while uuid[:n].isdigit():
+        n += 1
+    return uuid[:n]
 
 
 def _exchanges(pk: dict) -> list[dict]:
@@ -235,12 +247,14 @@ def _exchanges(pk: dict) -> list[dict]:
     ask("list, bad limit", "GET", "nodes?limit=0", bearer)
     ask("list, bad cursor", "GET", "nodes?limit=50&cursor=nonsense", bearer)
     ask("workgraph", "GET", f"nodes/{pk['bands']}", bearer)
-    ask("workgraph by uuid prefix", "GET", f"nodes/{pk['bands_uuid'][:8]}", bearer)
+    ask("workgraph by uuid prefix", "GET", f"nodes/{_prefix(pk['bands_uuid'])}", bearer)
     ask("workgraph from a deleted chat", "GET", f"nodes/{pk['workfunction']}", bearer)
     ask("running calculation", "GET", f"nodes/{pk['running']}", bearer)
     ask("calculation under a workgraph", "GET", f"nodes/{pk['relax_2']}", bearer)
     ask("structure", "GET", f"nodes/{pk['relaxed']}", bearer)
     ask("structure as extxyz", "GET", f"nodes/{pk['relaxed']}/structure.extxyz", bearer)
+    ask("workgraph archive, metadata", "GET", f"nodes/{pk['bands']}/archive.aiida?content=metadata", bearer)
+    ask("running calculation archive", "GET", f"nodes/{pk['running']}/archive.aiida?content=metadata", bearer)
     ask("retrieved file", "GET", f"nodes/{pk['relax_2']}/files/vasprun.xml", bearer)
     ask("file not retrieved", "GET", f"nodes/{pk['relax_2']}/files/CHGCAR", bearer)
     ask("another user's node", "GET", f"nodes/{pk['bob']}", bearer)
@@ -262,12 +276,13 @@ def _stable(exchanges: list[dict], pk: dict) -> str:
     uuids[pk.pop("bands_uuid")] = None    # asked for by prefix before any answer named it
     uuids = {u: f"cafe{i:04x}-0000-4000-8000-000000000000" for i, u in enumerate(uuids, 1)}
     for real, fake in uuids.items():
-        text = text.replace(real, fake).replace(f"nodes/{real[:8]}", f"nodes/{fake[:8]}")
+        n = len(_prefix(real))
+        text = text.replace(real, fake).replace(f"nodes/{real[:n]}", f"nodes/{fake[:n]}")
     # PKs: 1000 + rank, in creation order, wherever a PK appears as a value or in a path
     ranks = {v: 1000 + i for i, v in enumerate(sorted(set(pk.values())))}
     for node in orm.QueryBuilder().append(orm.Node, project="id").all(flat=True):
         ranks.setdefault(node, 1000 + len(ranks))
-    text = re.sub(r"(\"pk\": |nodes/|node ')(\d+)(?=[,}\n/\"?'])",
+    text = re.sub(r"(\"pk\": |nodes/|[Nn]ode ')(\d+)(?=[,}\n/\"?'])",
                   lambda m: m.group(1) + str(ranks.get(int(m.group(2)), m.group(2))), text)
     text = re.sub(r'"(ctime|created|expires)": "[^"]+"', r'"\1": "2026-10-24T00:00:00+00:00"', text)
     text = re.sub(r'sa_pat_[A-Za-z0-9_-]{20,}', "sa_pat_TOKEN", text)
@@ -277,6 +292,7 @@ def _stable(exchanges: list[dict], pk: dict) -> str:
         text = text.replace(c, f"CURSOR{i}")
     version = __import__("sim_agent").__version__
     text = text.replace(f'"version": "{version}"', '"version": "VERSION"')
+    text = re.sub(r'"aiida_version": "[^"]+"', '"aiida_version": "AIIDA_VERSION"', text)
     commit = subprocess.run(["git", "-C", str(Path(results_api.__file__).parent), "rev-parse", "HEAD"],
                             check=False, capture_output=True, text=True).stdout.strip() or "unknown"
     return json.dumps({"schema": results_api.SCHEMA,
@@ -291,6 +307,7 @@ def _quiet() -> None:
     import structlog
 
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
+    logging.disable(logging.WARNING - 1)    # AiiDA's archive export REPORTs each step
 
 
 def capture() -> str:
