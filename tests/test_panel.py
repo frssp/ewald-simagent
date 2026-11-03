@@ -37,7 +37,8 @@ def test_describe_joins_restarts_and_nests_call_paths(connected):
     from ewald_simagent.source import SimAgentWorkflows
 
     wf = SimAgentWorkflows().describe("100")
-    assert wf.complete and wf.path == "simagent:default/00000064-" and _names(wf) == ["relax", "scf", "bands"]
+    # the workflow's own path opens its first step, so it is that step's path: the notebook loads it once
+    assert wf.complete and wf.path == "simagent:default/00000064-/relax" and _names(wf) == ["relax", "scf", "bands"]
     relax = wf.steps[0]
     assert relax.runs == 2 and relax.mark() == "✓" and relax.path == "simagent:default/00000064-/relax"
     chg = next(o for o in relax.outputs if o.name == "CHGCAR")
@@ -46,6 +47,20 @@ def test_describe_joins_restarts_and_nests_call_paths(connected):
     mlff = SimAgentWorkflows().describe("simagent:400")
     assert _names(mlff) == ["dft"] and _names(mlff.steps[0]) == ["SiO2_000", "SiO2_001", "Si_000"]
     assert mlff.steps[0].steps[1].runs == 2
+
+
+def test_workflow_notebook_sets_pipe_to_the_step_not_a_copy(connected):
+    """A workflow notebook had ``result = load(head)`` beside ``relax``: the same calculation under
+    another name, so "plot bands" on pipe = result drew the relaxation's k-mesh."""
+    from ewald.workflow import notebook_text
+
+    from ewald_simagent.source import SimAgentWorkflows
+
+    text = notebook_text(SimAgentWorkflows().describe("100"))
+    assert "result = " not in text and "\npipe = relax\n" in text
+    assert "bands = load('simagent:default/00000064-/bands')" in text
+    single = SimAgentWorkflows().describe("300")          # a calculation itself keeps its own path
+    assert single.path == "simagent:default/0000012c"
 
 
 def test_without_login():

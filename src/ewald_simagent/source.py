@@ -143,4 +143,15 @@ def workflow(desc: dict, conn) -> Workflow:
         parent.steps.append(step)
     wf.outputs += [WorkflowOutput(s["link"], f"{head}/{s['link']}", kind="structure", note=s.get("formula") or "")
                    for s in desc.get("structures", [])]
+    wf.path = _main_path(desc, head, runs) or wf.path
     return wf
+
+
+def _main_path(desc: dict, head: str, runs) -> str:
+    """The path of the step that the workflow's own path opens (its first calculation with a
+    vasprun.xml, :func:`.resolve.resolve`), so a workflow notebook loads that step once under its
+    own name and sets ``pipe = relax``: a ``result`` that is ``relax`` under another name made
+    "plot the bands" draw the relaxation's k-mesh. "" when the workflow's path opens no step."""
+    first = next((key for key, calcs in runs.items()
+                  if any(TRAJECTORY_FILE in c.get("files", []) for c in calcs)), None)
+    return f"{head}/{'/'.join(first)}" if first else ""   # () (a calculation itself) or none: its own path
