@@ -62,7 +62,7 @@ def test_ai_reads_a_calculation_through_ewalds_workflow_tool(connected):
     from ewald.llm.tools import Toolset
 
     out = Toolset().call("describe_workflow", {"path": "simagent:100"}).content
-    assert out["path"] == "simagent:default/00000064-" and out["scalars"]["band_gap"] == 0.61
+    assert out["path"] == "simagent:default/00000064-/relax" and out["scalars"]["band_gap"] == 0.61
     assert [s["name"] for s in out["steps"]] == ["relax", "scf", "bands"]
     assert out["steps"][0]["runs"] == 2 and out["steps"][1]["work_dir"] == "/scratch/alice/103"
     assert {"name": "relaxed_structure", "path": "simagent:default/00000064-/relaxed_structure",

@@ -83,6 +83,13 @@ class TestLoad:
         assert "band_gap" not in data.attributes
         assert pipe.compute(n - 1).attributes["sim-agent"]["calc_pk"] == 102
 
+    def test_says_what_it_opened(self, connected):
+        """EWALD's AI lists ``FrameReader.opened`` with the notebook's variables: a workflow path
+        without a step is only its first calculation, and the step with the bands is named."""
+        whole = load("simagent:100").source.readers[0].opened
+        assert whole.startswith("step relax of vasp_bands 100 only") and "scf, bands" in whole
+        assert load("simagent:100/bands").source.readers[0].opened == "step bands of vasp_bands 100"
+
     def test_finished_files_are_cached(self, connected):
         load("simagent:100/bands")
         load("simagent:100/bands")

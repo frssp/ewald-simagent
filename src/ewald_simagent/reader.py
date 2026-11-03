@@ -104,6 +104,26 @@ def local_file(path: str, connection: str | None = None) -> str:
     return fetch(client, targets[0], conn)
 
 
+def opened(desc: dict, targets: list, parts: tuple = ()) -> str:
+    """What a path opened, in words, for EWALD's AI (``FrameReader.opened``): the step of a
+    workflow and, when the path named none, that it is only the first calculation, so "the
+    bands" are looked for in the step that has them, not here."""
+    from .resolve import run_key
+
+    files = [t for t in targets if t.kind == "file"]
+    if not files:
+        return ""
+    step = "/".join(run_key(files[0].node))
+    what = f"{desc.get('template') or desc.get('process_label') or 'calculation'} {desc.get('pk')}"
+    if not step:
+        return f"{files[0].name} of {what}"
+    others = [s for s in dict.fromkeys("/".join(run_key(c)) for c in desc.get("calculations", [])) if s and s != step]
+    if parts:
+        return f"step {step} of {what}"
+    return (f"step {step} of {what} only (a workflow path without a step opens its first calculation"
+            + (f"; the other steps are {', '.join(others[:8])}, opened by naming them" if others else "") + ")")
+
+
 class SimAgentReader(FrameReader):
     """A finished sim-agent calculation by AiiDA PK or UUID (read-only):
     ``simagent:[connection/]NODE[/step...][/file]``.
@@ -140,14 +160,19 @@ class SimAgentReader(FrameReader):
                 self._index += [(len(self._readers), i) for i in range(len(reader))]
                 self._readers.append((target, reader))
         trim_cache(keep={t.node["uuid"] for t in self.targets})
+        self.opened = opened(self.node, self.targets, self.uri.parts)
         states = {t.node.get("process_state") for t in self.targets if t.kind == "file"}
         if states - {"finished"}:
             self._set_incomplete(f"sim-agent calculation state: {', '.join(sorted(map(str, states)))}")
         if len(self._readers) == 1:
             inner = self._readers[0][1]
-            for attr in ("thermo", "electronic"):
-                if getattr(inner, attr, None) is not None:
-                    setattr(self, attr, getattr(inner, attr))
+            if getattr(inner, "thermo", None) is not None:
+                self.thermo = inner.thermo
+        # the restarts of one step: the last one's DOS and bands are the step's (what EWALD's AI is told)
+        last = next((r.electronic for _, r in reversed(self._readers) if getattr(r, "electronic", None) is not None),
+                    None)
+        if last is not None:
+            self.electronic = last
 
     def __len__(self) -> int:
         return len(self._index)
