@@ -78,14 +78,26 @@ def _archive_requests():
     return [r for r in Handler.requests if "archive.aiida" in r]
 
 
-def test_steps_get_their_shape_from_the_metadata_archive_once(source):
+def test_a_finished_workflow_is_the_archives_tree_read_once(source):
     wf = source.describe("600")
     steps = {s.name: s for _, s in wf.walk()}
-    assert steps["slab_111_t1_static"].shape == {"kind": "static", "flags": ["slab", "potential"]}
-    assert wf.shapes_from == ""
+    static = steps["slab_111_t1_static"]
+    assert static.shape == {"kind": "static", "flags": ["slab", "potential"]}
+    assert static.id == "602" and static.uuid == f"{602:08x}-0000-4000-8000-000000000000"   # the server's PK
+    assert static.path.endswith("/slab_111_t1_static") and static.path.startswith("simagent:")
+    assert {o.name for o in static.outputs} >= {"vasprun.xml", "locpot_planar_avg.json", "CHGCAR"}
+    assert static.as_dict()["shape"]["kind"] == "static"       # describe_workflow sees it
     assert _archive_requests() == ["/alice/api/v1/nodes/600/archive.aiida?content=metadata"]
     source.describe("600")
     assert len(_archive_requests()) == 1          # a finished workflow's archive is cached
+
+
+def test_nested_steps_and_restarts_come_from_the_archive(source):
+    mlff = source.describe("400")
+    assert [s.name for s in mlff.steps] == ["dft"]
+    assert [s.name for s in mlff.steps[0].steps] == ["SiO2_000", "SiO2_001", "Si_000"]
+    assert mlff.steps[0].steps[1].runs == 2 and mlff.steps[0].steps[1].id == "403"
+    assert mlff.steps[0].steps[1].path.endswith("/dft/SiO2_001")
 
 
 def test_a_new_template_gets_the_work_function_by_its_steps_shapes(source):
@@ -109,24 +121,36 @@ def test_a_new_template_gets_the_lineup_by_its_structures_roles(source):
     assert res["schottky_barrier_p_eV"] == pytest.approx(PHI_BP, abs=0.01)
 
 
-def test_without_an_archive_the_recipes_go_by_the_names(source, monkeypatch):
-    wf = source.describe("500")                   # no archive on this server: names
-    assert wf.shapes_from and wf.analyses[0].available
-    assert source.describe("300").shapes_from      # running: not even asked
-    assert not any("/300/" in r for r in _archive_requests())
-    from .conftest import NODES
-
-    NODES[300]["process_state"] = "finished"      # a single calculation, finished: its files only
-    try:
-        assert source.describe("300").shapes_from and not any("/300/" in r for r in _archive_requests())
-    finally:
-        NODES[300]["process_state"] = "running"
+def test_without_an_archive_the_calculations_are_listed_one_by_one(source, monkeypatch):
+    wf = source.describe("500")                   # no archive on this server
+    assert [s.name for s in wf.steps] == ["interface_relax", "interface_static", "ref_substrate_static",
+                                          "ref_film_static"]
+    assert wf.steps[1].id == "502" and wf.steps[1].shape == {}
+    assert wf.analyses[0].available               # the recipe goes by the task names
 
     def missing(path):
         raise ImportError("ewald_aiida")
 
-    monkeypatch.setattr("ewald_simagent.shapes._open_archive", missing)
+    monkeypatch.setattr("ewald_simagent.archive._open_archive", missing)
     wf = source.describe("700")
-    assert wf.shapes_from == "ewald-aiida is not installed" and wf.analyses == []
-    wf = source.describe("600")
-    assert wf.analyses[0].available             # by the names, as before
+    assert [s.name for s in wf.steps] == ["bulk_relax", "surface_a_scf", "surface_b_scf"]
+    assert wf.analyses == []                      # no shapes, and names no recipe knows
+
+
+def test_a_running_workflow_lists_its_calculations_without_asking_for_an_archive(source):
+    from .conftest import NODES
+
+    NODES[100]["process_state"] = "running"
+    calcs = NODES[100]["calculations"]
+    calcs[-1]["process_state"], files = "running", calcs[-1]["files"]
+    calcs[-1]["files"] = []                       # retrieved only when it finishes
+    try:
+        wf = source.describe("100")
+        assert [(s.name, s.runs, s.state) for s in wf.steps] == [
+            ("relax", 2, "finished"), ("scf", 1, "finished"), ("bands", 1, "running")]
+        assert wf.steps[0].path.endswith("/relax")           # a finished calculation opens on its own
+        assert wf.steps[2].path == "" and not any(o.name == "vasprun.xml" for o in wf.steps[2].outputs)
+        assert not _archive_requests()
+    finally:
+        NODES[100]["process_state"], calcs[-1]["process_state"], calcs[-1]["files"] = "finished", "finished", files
+    assert source.describe("300").steps == [] and not _archive_requests()   # a calculation itself

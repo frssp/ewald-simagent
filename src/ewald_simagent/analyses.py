@@ -6,7 +6,7 @@ that load those steps' files and compute the result with EWALD's own kernels
 sim-agent's ``finalize_workgraph`` output, which the API does not serve.
 
 Steps are found by what they computed when the workflow's archive gave them a ``shape``
-(:mod:`.shapes`: a static with a planar average on a slab is a work function's input, whatever
+(:mod:`.archive`: a static with a planar average on a slab is a work function's input, whatever
 the task is called; the band-offset roles come from the extras sim-agent puts on the input
 structures), and by sim-agent's task names otherwise, quoted with the file and constant they
 come from. So a new sim-agent template whose statics look like these gets the analysis without
@@ -44,6 +44,16 @@ def _shape(step) -> dict:
     return getattr(step, "shape", None) or {}
 
 
+def _structure_extras(wf, step) -> dict:
+    """The extras of ``step``'s input structure and of the structures it came from (ewald-aiida
+    follows the archive's provenance); {} without ewald-aiida."""
+    try:
+        from ewald_aiida import structure_extras
+    except ImportError:
+        return {}
+    return structure_extras(wf, step)
+
+
 def _statics(wf, *flags) -> dict:
     """``{name: step}`` of the steps the archive says are statics with all of ``flags``."""
     return {name: st for name, st in _steps(wf).items()
@@ -56,7 +66,7 @@ def _roles_by_extras(wf) -> dict | None:
     potential static has each role."""
     found: dict = {}
     for name, st in _statics(wf, "potential").items():
-        extras = getattr(st, "structure_extras", None) or {}
+        extras = _structure_extras(wf, st)
         role = extras.get(ROLE_EXTRA)
         role = role if role in ("substrate", "film") else "interface" if INTERFACE_EXTRA in extras else ""
         if role:
