@@ -145,21 +145,28 @@ slab static (`slab_<hkl>_<term>_static`): Phi = V_vac - E_F from its retrieved
 computes it; `work_function` is the table of all surfaces and `profiles` one plot table per
 surface on the vacuum level. A slab static without the planar average is named in `skipped`.
 
-### Steps found by what they computed
+### Steps of a workflow, and what they computed
 
-Before it offers an analysis the plugin fetches the workflow's AiiDA archive without its file
-contents (`archive.aiida?content=metadata`, kilobytes, once per finished workflow, kept in the
-cache with its files) and opens it with ewald-aiida, which describes every calculation by its
-inputs: the INCAR, k-points and input structure with its extras, as a `step.shape` (`kind`:
-static, relax, bands, dos, md, phonon; `flags`: slab, potential, cell_relax, charged). The
-recipes then find their steps by that rather than by sim-agent's task names: any static of a
+A finished workflow's steps come from its AiiDA archive without the file contents
+(`archive.aiida?content=metadata`, kilobytes, fetched once per finished workflow and kept in the
+cache with its files), opened by ewald-aiida: the same step tree the AiiDA side bar shows (nested
+by call label, restarts joined), with `simagent:` paths, the server's PKs and the files that come
+through sim-agent and SSH. Each step says what it was run with: `step.inputs` (INCAR, k-points,
+input structure with its extras), `step.shape` (`kind`: static, relax, bands, dos, md, phonon;
+`flags`: slab, potential, cell_relax, charged), `step.files` and `step.uuid`.
+
+The recipes find their steps by that rather than by sim-agent's task names: any static of a
 slab with a planar average gets its work function, and three potential statics whose structures
 carry vasp_band_offset's roles (`sim_agent_band_offset_role`, `sim_agent_interface`, on the
 structure or on the relaxation it came from) get the lineup. So a new sim-agent template made of
 such steps gets the analysis without a new release of this plugin; a template with a recipe of
-its own still uses that one. A single calculation is not asked for one (its files say what it is), and a running workflow (AiiDA exports only finished ones), a sim-agent
-without the archive route or a failing archive leave the steps as they were, and the recipes go
-by the task names as before; `wf.shapes_from` says why ("" when the archive was read).
+its own still uses that one.
+
+A workflow still running has no archive (AiiDA exports only sealed processes): it lists its
+calculations one by one, named by their call paths with restarts joined, and each one opens on its
+own once its files are retrieved. Whole-workflow analyses wait until it finishes. A finished
+workflow whose archive cannot be read (a sim-agent without the archive route, a bad archive) is
+listed the same way, and the recipes go by the task names.
 
 ## The contract with sim-agent
 

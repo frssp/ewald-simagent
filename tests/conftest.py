@@ -99,34 +99,63 @@ FILES.update({(pk, name): data for pk, step in ((804, "interface_static"), (805,
               for name, data in band_offset_files()[step].items()})
 
 
-def _astep(pk, name, kind="", flags=(), files=(), extras=None, parents=()):
-    """One step of an archive as ewald-aiida describes it (``step.shape``, ``inputs``, ...)."""
-    return {"name": name, "calc_id": str(pk + 90000), "calc_uuid": f"{pk:08x}-0000-4000-8000-000000000000",
-            "shape": {"kind": kind, "flags": list(flags)} if kind else {}, "files": list(files),
-            "inputs": {"structure": {"extras": extras or {}},
-                       "parents": [{"pk": p + 90000, "via": "structure"} for p in parents]}}
+def _uuid(pk):
+    return f"{pk:08x}-0000-4000-8000-000000000000"
 
 
-PLANAR = ("OUTCAR", "vasprun.xml", "locpot_planar_avg.json")
-#: node -> the steps its metadata archive holds (served as JSON; :func:`_fake_archives` opens it).
-#: Archive PKs differ from the server's, as after an import elsewhere: steps match by UUID.
-ARCHIVES = {
-    600: [_astep(601, "bulk_relax", "relax", ["cell_relax"]),
-          _astep(602, "slab_111_t1_static", "static", ["slab", "potential"], PLANAR),
-          _astep(603, "slab_100_t1_static", "static", ["slab", "potential"], PLANAR),
-          _astep(604, "slab_110_t1_static", "static", ["slab"], PLANAR[:2])],
-    700: [_astep(701, "bulk_relax", "relax", ["cell_relax"]),
-          _astep(702, "surface_a_scf", "static", ["slab", "potential"], PLANAR),
-          _astep(703, "surface_b_scf", "static", ["slab", "potential"], PLANAR)],
-    800: [_astep(801, "junction_relax", "relax", extras={"sim_agent_interface": {"n": 1}}),
-          _astep(802, "metal_relax", "relax", extras={"sim_agent_band_offset_role": "substrate",
-                                                      "sim_agent_interface": {"n": 1}}),
-          _astep(803, "oxide_relax", "relax", extras={"sim_agent_band_offset_role": "film",
-                                                      "sim_agent_interface": {"n": 1}}),
-          _astep(804, "junction_scf", "static", ["potential"], PLANAR, parents=[801]),
-          _astep(805, "metal_scf", "static", ["potential"], PLANAR, parents=[802]),
-          _astep(806, "oxide_scf", "static", ["potential"], PLANAR, parents=[803])],
-}
+def _astep(pk, kind="", flags=(), extras=None, parents=()):
+    """What ewald-aiida reads from the archive about calculation ``pk``: ``shape`` and ``inputs``
+    (its structure's extras, the calculations that made its inputs, by archive PK and UUID)."""
+    return pk, {"shape": {"kind": kind, "flags": list(flags)} if kind else {},
+                "inputs": {"structure": {"extras": extras or {}},
+                           "parents": [{"pk": p + 90000, "uuid": _uuid(p), "via": "structure"} for p in parents]}}
+
+
+#: calculation pk -> its shape and inputs in its workflow's metadata archive
+SHAPES = dict([
+    _astep(601, "relax", ["cell_relax"]),
+    _astep(602, "static", ["slab", "potential"]), _astep(603, "static", ["slab", "potential"]),
+    _astep(604, "static", ["slab"]),
+    _astep(701, "relax", ["cell_relax"]),
+    _astep(702, "static", ["slab", "potential"]), _astep(703, "static", ["slab", "potential"]),
+    _astep(801, "relax", extras={"sim_agent_interface": {"n": 1}}),
+    _astep(802, "relax", extras={"sim_agent_band_offset_role": "substrate", "sim_agent_interface": {"n": 1}}),
+    _astep(803, "relax", extras={"sim_agent_band_offset_role": "film", "sim_agent_interface": {"n": 1}}),
+    _astep(804, "static", ["potential"], parents=[801]),
+    _astep(805, "static", ["potential"], parents=[802]),
+    _astep(806, "static", ["potential"], parents=[803]),
+])
+#: finished workflows the server has no archive for (an older server): steps are calculations
+NO_ARCHIVE = {500}
+
+
+def archive_steps(node: dict) -> list:
+    """The steps ewald-aiida describes from ``node``'s metadata archive: nested by call label,
+    restarts (``iteration_NN``) joined into one step with the last run's facts, archive PKs that
+    differ from the server's (as after an import elsewhere). Served as JSON; :func:`_fake_archives`
+    opens it."""
+    top: list = []
+    for calc in node["calculations"]:
+        key = list(calc["path"])
+        if key and key[-1].startswith("iteration_"):
+            key = key[:-1]
+        level = top
+        for part in key[:-1]:
+            found = next((s for s in level if s["name"] == part), None)
+            if found is None:
+                found = {"name": part, "state": "finished", "steps": []}
+                level.append(found)
+            level = found["steps"]
+        step = next((s for s in level if s["name"] == key[-1]), None)
+        if step is None:
+            step = {"name": key[-1], "runs": 0, "steps": []}
+            level.append(step)
+        step.update({"runs": step["runs"] + 1, "uuid": calc["uuid"], "id": str(calc["pk"] + 90000),
+                     "state": calc["process_state"], "exit_status": calc["exit_status"],
+                     "files": list(calc["files"]), "work_dir": (calc["remote"] or {}).get("path") or "",
+                     "path": f"aiida:archive-0/{calc['pk'] + 90000}", **SHAPES.get(calc["pk"], {})})
+    return top
+
 
 NODES[500]["ctime"] = "2026-10-01T00:00:00+00:00"   # the oldest: the listing tests above it stay as they were
 NODES[600]["ctime"] = "2026-09-30T00:00:00+00:00"
@@ -203,9 +232,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[2].split("?")[0] == "archive.aiida" and node is not None:
             if node.get("process_state") != "finished":
                 return self._send(409, b'{"status": "error", "code": "not_finished", "message": "still running"}')
-            if node["pk"] not in ARCHIVES or "content=metadata" not in parts[2]:
+            if node["pk"] in NO_ARCHIVE or "content=metadata" not in parts[2]:
                 return self._send(404, b'{"status": "error", "message": "no archive here"}')
-            return self._send(200, json.dumps(ARCHIVES[node["pk"]]).encode(), "application/zip")
+            return self._send(200, json.dumps(archive_steps(node)).encode(), "application/zip")
         if len(parts) == 3 and parts[2] == "structure.extxyz" and node and node["kind"] == "structure":
             return self._send(200, EXTXYZ.encode(), "text/plain")
         if (len(parts) >= 4 and parts[2] == "files" and int(parts[1]) in calcs
@@ -253,20 +282,20 @@ def server():
 
 @pytest.fixture(autouse=True)
 def _fake_archives(monkeypatch):
-    """ewald-aiida's ``open_archive`` for the fake server's archives (JSON, not AiiDA's zip:
-    opening real ones is ewald-aiida's to test)."""
+    """ewald-aiida's ``open_archive`` for the fake server's archives (JSON of
+    :func:`archive_steps`, not AiiDA's zip: opening real ones is ewald-aiida's to test)."""
     from ewald.plugin_api import Workflow, WorkflowStep
 
-    def open_archive(path):
-        wf = Workflow("archive")
-        for d in json.loads(Path(path).read_text(encoding="utf-8")):
-            step = WorkflowStep(d.pop("name"))
-            for key, value in d.items():
-                setattr(step, key, value)
-            wf.steps.append(step)
-        return wf
+    def step(d):
+        st = WorkflowStep(d.pop("name"), steps=[step(c) for c in d.pop("steps", [])])
+        for key, value in d.items():
+            setattr(st, key, value)
+        return st
 
-    monkeypatch.setattr("ewald_simagent.shapes._open_archive", open_archive)
+    def open_archive(path):
+        return Workflow("archive", steps=[step(d) for d in json.loads(Path(path).read_text(encoding="utf-8"))])
+
+    monkeypatch.setattr("ewald_simagent.archive._open_archive", open_archive)
 
 
 @pytest.fixture(autouse=True)
